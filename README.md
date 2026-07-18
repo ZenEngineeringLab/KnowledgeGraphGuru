@@ -1,12 +1,8 @@
 # KnowledgeGraphGuru
 
-> **Knowledge is the source of truth.**
+> **A knowledge platform designed for humans and AI agents, built on a canonical knowledge graph. Knowledge is the source of truth.**
 
 Uma plataforma serverless de conhecimento que modela conhecimento como **objetos conectados**, e não como documentos — oferecendo um grafo de conhecimento canônico para humanos e agentes de IA.
-
-🌐 **[knowledgegraph.guru](https://knowledgegraph.guru)**
-
-> Descrição (GitHub): *A serverless knowledge platform that models knowledge as connected objects rather than documents, providing a canonical knowledge graph for humans and AI agents.*
 
 ---
 
