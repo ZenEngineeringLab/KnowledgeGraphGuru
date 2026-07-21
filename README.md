@@ -97,6 +97,14 @@ Export    ⟦rel_01H8Z⟧           →  lê o título ATUAL do alvo  →  [[Mod
 
 Relations que não têm posição no texto — como uma seta extraída de um diagrama Mermaid — são igualmente cidadãs de primeira classe, apenas sem âncora. Veja [DESIGN.md §3.8](DESIGN.md).
 
+### A plataforma recusa ambiguidade
+
+Um nome de arquivo acumula dois papéis: identidade e endereço. Aqui eles são separados — o **`id`** é imutável e é o que as relations usam; o **`slug`** (título normalizado) é o endereço legível, único, usado para resolver `[[…]]` e nomear o arquivo exportado.
+
+Como uma nota pertence a várias coleções ao mesmo tempo, não existe "a pasta dela" — a unicidade é **global**. E quando dois títulos colidem, o sistema **não escolhe por você**: devolve o conflito com o conteúdo existente e deixa quem escreveu decidir se é a mesma nota ou se os títulos precisam mudar.
+
+Duas notas com o mesmo título não são um problema de nomes — são um sinal de que ou o conhecimento está duplicado, ou o vocabulário está degradando. Resolver isso é trabalho semântico, e é do autor (ou do agente), não da plataforma.
+
 ### Organização
 
 A estrutura de diretórios deixa de ser física. Ela é expressa por meio de objetos `Collection`, e uma mesma nota pode pertencer a **múltiplas coleções simultaneamente**.

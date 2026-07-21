@@ -124,13 +124,29 @@ Catálogo da visão completa:
 
 Novos tipos podem ser introduzidos sem alterar o modelo — um tipo é definido pela sua **forma de content**, pelo seu **analyzer** e por como os **renderers** sabem projetá-lo.
 
-### 3.3 Identidade
+### 3.3 Identidade e endereço
 
-- Todo Knowledge Object tem um **identificador imutável** (`id`).
-- O `id` nunca muda, mesmo quando content, structure, properties ou relations mudam.
-- As relations referenciam objetos por `id`, então mover ou renomear um objeto nunca quebra um vínculo.
+Duas coisas que um nome de arquivo acumulava — e que aqui são separadas:
 
-Este é o diferencial estrutural frente a Markdown + wikilinks, onde o link é texto e quebra ao renomear.
+| | `id` | `slug` |
+| --- | --- | --- |
+| Papel | **Identidade** — qual objeto é este | **Endereço** — como um humano se refere a ele |
+| Formato | ULID com prefixo (`ko_01H8Z…`) | Título normalizado (`modelo-canonico`) |
+| Muda? | ❌ nunca | ✅ acompanha o título |
+| Usado por | Todas as relations | Resolução de `[[…]]`, nome de arquivo na exportação |
+| Único? | Por construção | **Por restrição** (§6.1) |
+
+**O `id` é imutável.** Nunca muda, mesmo quando content, structure, properties ou relations mudam. Como as relations referenciam objetos por `id`, mover ou renomear um objeto nunca quebra um vínculo — o diferencial estrutural frente a Markdown + wikilinks, onde o link é texto e quebra ao renomear.
+
+**O `slug` é a chave natural.** É a forma normalizada do título (minúsculas, sem acentos, espaços viram hífen), derivada automaticamente — nunca digitada. Ele existe porque o `id` não resolve tudo que o nome de arquivo resolvia:
+
+- impedir que duas notas representem a mesma coisa sem que ninguém perceba;
+- resolver `[[Modelo Canônico]]` para **exatamente um** objeto na importação — sem isso, o mecanismo de âncora (§3.8) é ambíguo e a importação deixa de ser determinística;
+- nomear o arquivo na exportação (`modelo-canonico.md`).
+
+**A unicidade é global**, não por coleção. Isso é imposto pelo modelo: uma nota pertence a N collections simultaneamente (§3.5), então não existe "a pasta dela" para servir de escopo. É o preço direto de coleções extrínsecas.
+
+Renomear muda o slug e não quebra nada, porque as relations usam `id`. O slug antigo passa a constar em `properties.aliases`, que compartilha o mesmo namespace de resolução — links escritos com o nome antigo continuam resolvendo.
 
 ### 3.4 Exemplo ilustrativo de uma `Note` no MVP
 
@@ -308,10 +324,15 @@ O DynamoDB é o armazenamento principal. Ele guarda **apenas** Knowledge Objects
 
 **Padrão adotado: single-table com adjacency list**. Objetos e arestas coexistem na mesma tabela; um GSI invertido resolve os lookups reversos (backlinks).
 
-| Item | PK | SK |
-| --- | --- | --- |
-| Knowledge Object | `KO#<id>` | `META` |
-| Aresta (relation) | `KO#<origem>` | `REL#<tipo>#<relId>` |
+| Item | PK | SK | Papel |
+| --- | --- | --- | --- |
+| Knowledge Object | `KO#<id>` | `META` | O objeto |
+| Aresta (relation) | `KO#<origem>` | `REL#<tipo>#<relId>` | Vínculo |
+| Lock de slug | `SLUG#<slug>` | `SLUG` | Unicidade + resolução de nome |
+
+O **lock de slug** implementa a restrição de unicidade (§3.3), que o DynamoDB não oferece nativamente para atributos fora da chave: o item é escrito na mesma `TransactWriteItems` do objeto, sob condição `attribute_not_exists(PK)`. Se o slug já existe, a transação inteira falha — não há janela para duplicata.
+
+Ele também entrega, de graça, o `GetItem` que a importação usa para resolver `[[Título]]` → `id`. Aliases (§3.3) ocupam o mesmo namespace: cada alias é um lock apontando para o mesmo objeto.
 
 | Índice | PK | Serve |
 | --- | --- | --- |
@@ -349,7 +370,7 @@ Consequências de design:
 
 - As chaves do DynamoDB **não** precisam de uma dimensão de tenant/workspace.
 - A autorização (IAM + nível de API) protege a *instância* inteira, não recortes de conhecimento por usuário.
-- Escritas concorrentes são raras por definição, o que reduz muito a pressão sobre o controle de concorrência (§8.3).
+- Escritas concorrentes são raras por definição, o que reduz muito a pressão sobre o controle de concorrência (§8.4).
 - Multi-tenancy permanece um não-objetivo (§1). Se necessário no futuro, introduzir escopo de tenant nas chaves e nos eventos é uma evolução conhecida — registrada em §12.
 
 ---
@@ -390,15 +411,61 @@ As regras que governam o que acontece ao criar, importar, atualizar e remover co
 
 > **Toda relation aponta para um objeto que existe, e toda âncora aponta para uma relation que existe.**
 
-### 8.1 Criação e importação
+### 8.1 Colisão de slug: a plataforma recusa, não resolve
+
+Duas notas com o mesmo título não são um problema técnico de nomes — são um **sinal semântico**. Ou representam o mesmo conhecimento e deveriam ser uma só, ou os títulos estão ruins e o vocabulário do acervo está degradando. Nos dois casos, quem sabe a resposta é o autor.
+
+> **A plataforma recusa ambiguidade. Ela não a resolve.**
+
+Sufixar `-2` silenciosamente é o que um sistema de *arquivos* faz. Um sistema que modela *conhecimento* recusa a escrita e devolve o contexto necessário para decidir.
+
+**Por que a plataforma não faz merge.** Do outro lado da API há um agente ou uma pessoa. Reconciliar dois textos é trabalho semântico — exatamente o que o cliente sabe fazer e a plataforma não. Não existe algoritmo de merge aqui, nem política de "substitui ou anexa".
+
+O papel da plataforma se reduz a três: **detectar**, **recusar**, **informar**.
+
+#### Contrato
+
+Uma escrita cujo slug já existe recebe `409` com tudo que o cliente precisa para decidir em uma única ida:
+
+```json
+{
+  "error": "slug_conflict",
+  "slug": "modelo-canonico",
+  "existing": {
+    "id": "ko_01H8Z...",
+    "title": "Modelo Canônico",
+    "version": 7,
+    "content": { "format": "ckm/text", "value": "..." }
+  }
+}
+```
+
+O `content` vem inteiro porque o cliente faria esse `GET` em todos os casos. O `version` é o que ele devolve na atualização, para o controle otimista (§8.4) — se outra escrita entrar no meio, a operação falha limpa em vez de sobrescrever.
+
+#### Resolução
+
+Não há endpoint de resolução. A decisão vira uma escrita comum:
+
+| Decisão do cliente | O que ele faz |
+| --- | --- |
+| "É a mesma nota" | `PUT` no objeto existente, com o texto que ele mesmo reconciliou e a `version` recebida |
+| "São notas diferentes" | Nova escrita, com outro título — o dele ou o da nota já existente |
+
+Todo o mecanismo custa **um código de status e um payload bem desenhado**. Nenhuma rota nova.
+
+> **Política.** No MVP existe uma só: recusar e exigir resolução explícita. O comportamento fica atrás de uma *policy* para que variantes futuras — auto-merge na reimportação de um acervo conhecido, por exemplo — tenham onde ser plugadas sem redesenhar o fluxo.
+
+### 8.2 Criação e importação
 
 **Links não resolvidos criam notas stub.** Importar `[[Nota Que Não Existe]]` cria uma `Note` com `properties.status = "stub"` e estabelece a relation normalmente.
 
 Isso preserva o fluxo de escrita do ecossistema Markdown — citar algo antes de escrevê-lo — sem abrir exceção na invariante. A nota stub passa a ser um item de trabalho visível no próprio grafo, e escrever nela depois é apenas atualizá-la: o `id` já existe, nenhum vínculo precisa ser refeito.
 
+**Escrever numa stub não é colisão.** Tecnicamente o slug já está ocupado, mas uma stub não tem conteúdo — não há nada a reconciliar. Preencher a lacuna é o comportamento pretendido, então essa escrita não devolve `409` (§8.1).
+
 **Cada ocorrência é uma relation.** Citar a mesma nota duas vezes no mesmo texto gera duas relations, com `id` e âncoras distintos. Cada ocorrência é uma asserção própria, em uma posição própria; modelar como uma relation com múltiplas âncoras complicaria escrita e remoção sem benefício. A deduplicação fica a cargo das consultas — "quais notas esta referencia" agrupa por alvo.
 
-### 8.2 Remoção
+### 8.3 Remoção
 
 **Deletar um objeto cascateia.** As relations que **apontam para ele** também são removidas, com um `RelationRemoved` emitido para cada uma. Um grafo com alvos inexistentes contaminaria backlinks, renderização e toda projeção futura.
 
@@ -408,13 +475,13 @@ Consequência operacional: o custo do delete é proporcional ao número de backl
 
 Como isso altera o `content` do objeto de origem, a remoção incrementa a versão dele e emite `KnowledgeUpdated`. O texto ao redor do link é preservado; some apenas o vínculo.
 
-### 8.3 Concorrência
+### 8.4 Concorrência
 
 Controle **otimista por objeto**: `meta.version` é incrementado a cada escrita e validado por condição no `PutItem`/`UpdateItem`. Uma escrita sobre versão desatualizada falha, e o cliente reconcilia.
 
 Com a `Note` atômica, o objeto é a unidade de conflito — não há consistência em nível de árvore a manter. Esse problema só aparece na Fase 4.
 
-### 8.4 Anexos
+### 8.5 Anexos
 
 O upload de binários usa **presigned URL do S3** (§7). A API cria o objeto `Attachment` e autoriza a operação; os bytes vão direto ao bucket.
 
@@ -496,6 +563,8 @@ Tudo o mais neste documento reflete decisões já tomadas. Permanecem em aberto:
 3. **Multi-tenancy futuro** — como introduzir escopo de tenant nas chaves e nos eventos, caso o projeto evolua para SaaS (§6.3).
 4. **Reconciliação de anexos** — o que fazer com um `Attachment` cujo upload via presigned URL nunca se completou.
 5. **Escape de âncoras** — regra para o caso de borda em que `⟦ ⟧` aparece literalmente no conteúdo do usuário.
+6. **Importação de acervo inteiro** — resolver conflito a conflito via `409` (§8.1) não escala para um vault com centenas de arquivos. Vai exigir uma *sessão de importação* que acumula pendências e as apresenta em lote. Consequência conhecida, fora do escopo da Fase 1.
+7. **Normalização de slug** — regra exata para acentuação, pontuação, emojis e títulos que normalizam para vazio (§3.3).
 
 ---
 
@@ -508,6 +577,8 @@ Tudo o mais neste documento reflete decisões já tomadas. Permanecem em aberto:
 - **Relation inline** — relation que se manifesta em um ponto específico do conteúdo, marcada por uma âncora (§3.7).
 - **Relation standalone** — relation puramente semântica, sem posição no conteúdo (§3.7).
 - **Âncora** — token no `content` que marca a posição de uma relation inline, referenciando-a por `id` (§3.8).
+- **Slug** — título normalizado (`Modelo Canônico` → `modelo-canonico`) que serve de endereço único e legível do objeto; derivado automaticamente, nunca digitado (§3.3).
+- **Stub** — nota criada automaticamente por um link para conhecimento que ainda não foi escrito (§8.2).
 - **Renderer** — uma projeção pura e unidirecional dos objetos em uma representação (Markdown, HTML, JSON, MCP).
 - **Analyzer** — um componente que enriquece o grafo a partir do content de um objeto.
 - **Projeção** — uma visão otimizada para leitura, derivada do consumo de eventos (search, vector, graph, analytics).
