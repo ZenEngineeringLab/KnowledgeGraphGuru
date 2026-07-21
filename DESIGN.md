@@ -73,7 +73,7 @@ O MVP entrega **vizinhança de 1 salto**:
 - relations de entrada — *backlinks* ("quem referencia esta nota");
 - pertencimento a collections.
 
-**Não** entrega travessia multi-hop, caminho mais curto ou consultas de grafo. Isso é uma limitação consciente do DynamoDB como armazenamento (§6.1) e é endereçado depois pela **Graph Projection** (§9).
+**Não** entrega travessia multi-hop, caminho mais curto ou consultas de grafo. Isso é uma limitação consciente do DynamoDB como armazenamento (§6.1) e é endereçado depois pela **Graph Projection** (§10).
 
 ### 2.4 Fases
 
@@ -191,6 +191,16 @@ Nem toda relation tem posição no texto. O modelo distingue dois casos:
 
 Ambas são relations de primeira classe, com o mesmo peso no grafo. A diferença é apenas se existe — ou não — um ponto no conteúdo onde ela se manifesta.
 
+#### Vocabulário
+
+O conjunto de tipos é **fechado e validado** no MVP:
+
+`references` · `depends_on` · `related_to` · `implements` · `alternative_to` · `embeds` · `in_collection`
+
+**Alternativa rejeitada:** vocabulário aberto, definido pelo usuário. Degrada rapidamente em sinônimos (`refers_to`, `ref`, `references`) que inviabilizam consultas consistentes no grafo. Abrir o conjunto depois é retrocompatível; fechá-lo depois, não.
+
+Note que `in_collection` é uma relation como qualquer outra (§6.1) — pertencer a uma coleção não é um mecanismo à parte.
+
 ### 3.8 Mecanismo de âncora
 
 Uma relation inline precisa ser renderizada **no lugar certo** do texto. Duas abordagens ingênuas falham:
@@ -216,7 +226,7 @@ O formato `ckm/text` é uma **string legível**: sintaxe inline de Markdown (`**
 }
 ```
 
-Manter o content como string legível — em vez de um AST de nós inline — é uma escolha deliberada por inspecionabilidade e diffs úteis no git ([ADR-005](DECISIONS.md)). O AST inline fica para a Fase 4, junto com a decomposição em blocos: granularidade vertical e horizontal são a mesma máquina.
+**Alternativa rejeitada:** representar o content como um AST de nós inline (`[{"text":…},{"ref":…}]`). Elimina o escaping e é conceitualmente mais puro, mas sacrifica a legibilidade do conteúdo e a utilidade dos diffs no git — que são requisitos deste projeto. O AST inline fica para a Fase 4, junto com a decomposição em blocos: granularidade vertical e horizontal são a mesma máquina, e serão construídas de uma vez.
 
 Consequências:
 
@@ -234,7 +244,7 @@ Import    [[Modelo Canônico]]   →  resolve título → id  →  ⟦rel_01H8Z�
 Export    ⟦rel_01H8Z⟧           →  lê o título ATUAL do alvo           →  [[Modelo Canônico]]
 ```
 
-Links para notas inexistentes (`[[Nota Que Não Existe]]`) criam uma `Note` com `status: "stub"`, mantendo a regra de que toda relation aponta para um objeto real ([ADR-012](DECISIONS.md)).
+Links para notas inexistentes (`[[Nota Que Não Existe]]`) criam uma `Note` com `status: "stub"`, mantendo a regra de que toda relation aponta para um objeto real.
 
 ---
 
@@ -296,7 +306,7 @@ Analyzers rodam dentro do pipeline de ingestão (§7). Cada tipo de objeto pode 
 
 O DynamoDB é o armazenamento principal. Ele guarda **apenas** Knowledge Objects e suas relations — nenhum dado binário.
 
-**Padrão adotado: single-table com adjacency list** ([ADR-006](DECISIONS.md)). Objetos e arestas coexistem na mesma tabela; um GSI invertido resolve os lookups reversos (backlinks).
+**Padrão adotado: single-table com adjacency list**. Objetos e arestas coexistem na mesma tabela; um GSI invertido resolve os lookups reversos (backlinks).
 
 | Item | PK | SK |
 | --- | --- | --- |
@@ -321,9 +331,9 @@ Access patterns que o MVP precisa suportar:
 | 5 | Listar as collections de um objeto | `Query` em `KO#<id>`, prefixo `REL#in_collection#` |
 | 6 | Listar objetos por tipo | `Query` no GSI2 |
 
-**Consistência:** as relations de saída (padrões 2 e 5) são fortemente consistentes, pois vivem na partição do próprio objeto. Já os **backlinks (padrões 3 e 4) são eventualmente consistentes por contrato** — GSIs do DynamoDB são atualizados de forma assíncrona, e a API não promete que uma relation recém-criada apareça imediatamente no alvo ([ADR-017](DECISIONS.md)).
+**Consistência:** as relations de saída (padrões 2 e 5) são fortemente consistentes, pois vivem na partição do próprio objeto. Já os **backlinks (padrões 3 e 4) são eventualmente consistentes por contrato** — GSIs do DynamoDB são atualizados de forma assíncrona, e a API não promete que uma relation recém-criada apareça imediatamente no alvo.
 
-**Limitação assumida:** o DynamoDB resolve bem **um salto**. Travessia multi-hop exige N queries sequenciais e não é objetivo do MVP (§2.3) — a Graph Projection (§9) endereça isso quando houver necessidade real.
+**Limitação assumida:** o DynamoDB resolve bem **um salto**. Travessia multi-hop exige N queries sequenciais e não é objetivo do MVP (§2.3) — a Graph Projection (§10) endereça isso quando houver necessidade real.
 
 **Limite operacional:** `TransactWriteItems` suporta no máximo 100 itens. Com a `Note` atômica do MVP, uma escrita típica é de poucos itens (a nota + suas arestas), bem dentro do limite. Este limite é uma das razões concretas para adiar a decomposição em blocos (§2.1).
 
@@ -339,14 +349,8 @@ Consequências de design:
 
 - As chaves do DynamoDB **não** precisam de uma dimensão de tenant/workspace.
 - A autorização (IAM + nível de API) protege a *instância* inteira, não recortes de conhecimento por usuário.
-- Escritas concorrentes são raras por definição, o que reduz muito a pressão sobre o controle de concorrência (§6.4).
-- Multi-tenancy permanece um não-objetivo (§1). Se necessário no futuro, introduzir escopo de tenant nas chaves e nos eventos é uma evolução conhecida — registrada em §11.
-
-### 6.4 Concorrência
-
-Controle **otimista por objeto**: `meta.version` é incrementado a cada escrita e validado via condição no `PutItem`/`UpdateItem`. Uma escrita sobre versão desatualizada falha e o cliente reconcilia.
-
-Com a `Note` atômica, o objeto é a unidade de conflito — não há necessidade de consistência em nível de árvore. Esse problema só aparece na Fase 4.
+- Escritas concorrentes são raras por definição, o que reduz muito a pressão sobre o controle de concorrência (§8.3).
+- Multi-tenancy permanece um não-objetivo (§1). Se necessário no futuro, introduzir escopo de tenant nas chaves e nos eventos é uma evolução conhecida — registrada em §12.
 
 ---
 
@@ -354,7 +358,7 @@ Com a `Note` atômica, o objeto é a unidade de conflito — não há necessidad
 
 Toda escrita flui pela API: **nenhuma escrita no modelo de conhecimento ocorre fora dela.**
 
-> A única exceção é o *payload binário* de anexos, que sobe direto para o S3 via presigned URL — os bytes não são conhecimento; o conhecimento é o objeto `Attachment`, e esse continua sendo criado exclusivamente pela API ([ADR-016](DECISIONS.md)).
+> A única exceção é o *payload binário* de anexos, que sobe direto para o S3 via presigned URL — os bytes não são conhecimento; o conhecimento é o objeto `Attachment`, e esse continua sendo criado exclusivamente pela API.
 
 ```
 Cliente
@@ -380,7 +384,45 @@ No MVP, o estágio *Analyzers* é um passo vazio (pass-through) — o pipeline j
 
 ---
 
-## 8. Eventos
+## 8. Semântica de escrita e ciclo de vida
+
+As regras que governam o que acontece ao criar, importar, atualizar e remover conhecimento. Todas existem para sustentar uma única invariante:
+
+> **Toda relation aponta para um objeto que existe, e toda âncora aponta para uma relation que existe.**
+
+### 8.1 Criação e importação
+
+**Links não resolvidos criam notas stub.** Importar `[[Nota Que Não Existe]]` cria uma `Note` com `properties.status = "stub"` e estabelece a relation normalmente.
+
+Isso preserva o fluxo de escrita do ecossistema Markdown — citar algo antes de escrevê-lo — sem abrir exceção na invariante. A nota stub passa a ser um item de trabalho visível no próprio grafo, e escrever nela depois é apenas atualizá-la: o `id` já existe, nenhum vínculo precisa ser refeito.
+
+**Cada ocorrência é uma relation.** Citar a mesma nota duas vezes no mesmo texto gera duas relations, com `id` e âncoras distintos. Cada ocorrência é uma asserção própria, em uma posição própria; modelar como uma relation com múltiplas âncoras complicaria escrita e remoção sem benefício. A deduplicação fica a cargo das consultas — "quais notas esta referencia" agrupa por alvo.
+
+### 8.2 Remoção
+
+**Deletar um objeto cascateia.** As relations que **apontam para ele** também são removidas, com um `RelationRemoved` emitido para cada uma. Um grafo com alvos inexistentes contaminaria backlinks, renderização e toda projeção futura.
+
+Consequência operacional: o custo do delete é proporcional ao número de backlinks do objeto.
+
+**Remover uma relation inline remove sua âncora.** As duas operações ocorrem na **mesma transação** — uma âncora apontando para uma relation inexistente é um estado inválido que o renderer teria de adivinhar como tratar.
+
+Como isso altera o `content` do objeto de origem, a remoção incrementa a versão dele e emite `KnowledgeUpdated`. O texto ao redor do link é preservado; some apenas o vínculo.
+
+### 8.3 Concorrência
+
+Controle **otimista por objeto**: `meta.version` é incrementado a cada escrita e validado por condição no `PutItem`/`UpdateItem`. Uma escrita sobre versão desatualizada falha, e o cliente reconcilia.
+
+Com a `Note` atômica, o objeto é a unidade de conflito — não há consistência em nível de árvore a manter. Esse problema só aparece na Fase 4.
+
+### 8.4 Anexos
+
+O upload de binários usa **presigned URL do S3** (§7). A API cria o objeto `Attachment` e autoriza a operação; os bytes vão direto ao bucket.
+
+Existe, portanto, uma janela em que um `Attachment` já existe no grafo mas seu binário ainda não chegou — o estado do objeto precisa refletir isso. A reconciliação de uploads que nunca se completam é uma questão em aberto (§12).
+
+---
+
+## 9. Eventos
 
 Toda alteração publica eventos de domínio via EventBridge. Os eventos são o ponto de extensão que permite às projeções ficarem em sincronia sem que o núcleo precise conhecê-las.
 
@@ -392,15 +434,15 @@ Eventos principais:
 - `RelationCreated`
 - `RelationRemoved`
 
-### 8.1 Log durável e replay
+### 9.1 Log durável e replay
 
-EventBridge é um **barramento**, não um log durável — por padrão, eventos publicados não ficam disponíveis para reprocessamento. Como a promessa de reconstruir projeções do zero (§9) depende disso, o MVP habilita **EventBridge Archive & Replay** desde o início.
+EventBridge é um **barramento**, não um log durável — por padrão, eventos publicados não ficam disponíveis para reprocessamento. Como a promessa de reconstruir projeções do zero (§10) depende disso, o MVP habilita **EventBridge Archive & Replay** desde o início.
 
 Consequência: qualquer projeção pode ser criada ou reconstruída depois, reprocessando o arquivo — sem que o núcleo precise ser alterado.
 
 > A fonte da verdade continua sendo o grafo no DynamoDB. O arquivo de eventos é o mecanismo de *reconstrução de projeções*, não um event store canônico.
 
-### 8.2 Envelope
+### 9.2 Envelope
 
 Todo evento carrega, no mínimo: `eventId`, `eventType`, `eventVersion`, `occurredAt`, `objectId` e o payload relevante. `eventId` serve como chave de idempotência para consumidores.
 
@@ -408,7 +450,7 @@ Todo evento carrega, no mínimo: `eventId`, `eventType`, `eventVersion`, `occurr
 
 ---
 
-## 9. Evolução: projeções
+## 10. Evolução: projeções
 
 A arquitetura é desenhada para que novas **projeções** — visões otimizadas para leitura, construídas consumindo eventos — possam ser adicionadas **sem alterar o modelo canônico**. Uma projeção é estado derivado; o grafo no DynamoDB continua sendo a fonte da verdade.
 
@@ -419,21 +461,21 @@ A arquitetura é desenhada para que novas **projeções** — visões otimizadas
 | **Graph Projection** | 5 | Travessia multi-hop e consultas nativas de grafo | Neo4j / Amazon Neptune |
 | **Analytics Projection** | 5 | Métricas e relatórios | armazenamento analítico |
 
-Cada projeção assina o stream de eventos (§8), constrói sua própria visão e pode ser reconstruída do zero via replay do arquivo (§8.1).
+Cada projeção assina o stream de eventos (§9), constrói sua própria visão e pode ser reconstruída do zero via replay do arquivo (§9.1).
 
 A **Search Projection** é deliberadamente a primeira: ela valida o mecanismo de projeções ponta a ponta com custo baixo, antes de qualquer investimento maior.
 
 ---
 
-## 10. Stack e organização do código
+## 11. Stack e organização do código
 
 | Camada | Decisão |
 | --- | --- |
-| Runtime | TypeScript / Node.js 22 em Lambda ARM64 ([ADR-001](DECISIONS.md)) |
-| Infraestrutura como código | AWS CDK em TypeScript ([ADR-002](DECISIONS.md)) |
-| Testes | Unit no `core` · integração com DynamoDB Local · E2E em conta sandbox ([ADR-004](DECISIONS.md)) |
+| Runtime | TypeScript / Node.js 22 em Lambda ARM64 |
+| Infraestrutura como código | AWS CDK em TypeScript |
+| Testes | Unit no `core` · integração com DynamoDB Local · E2E em conta sandbox |
 
-Monorepo com três pacotes ([ADR-003](DECISIONS.md)):
+Monorepo com três pacotes:
 
 | Pacote | Responsabilidade | Depende de AWS? |
 | --- | --- | --- |
@@ -445,19 +487,19 @@ O `core` livre de AWS é a materialização do princípio *storage is an impleme
 
 ---
 
-## 11. Questões de design em aberto
+## 12. Questões de design em aberto
 
-As decisões já tomadas estão registradas em **[DECISIONS.md](DECISIONS.md)**. Permanecem em aberto:
+Tudo o mais neste documento reflete decisões já tomadas. Permanecem em aberto:
 
 1. **Taxonomia de formatos de content** — o conjunto canônico de valores de `content.format` além de `ckm/text`, e como renderers/analyzers se registram para eles (relevante a partir da Fase 2).
 2. **Critério para a Fase 4** — que evidência de uso justifica descer para blocos finos e para o AST inline (§2.1).
 3. **Multi-tenancy futuro** — como introduzir escopo de tenant nas chaves e nos eventos, caso o projeto evolua para SaaS (§6.3).
-4. **Reconciliação de anexos** — o que fazer com um `Attachment` cujo upload via presigned URL nunca se completou ([ADR-016](DECISIONS.md)).
-5. **Escape de âncoras** — regra para o caso de borda em que `⟦ ⟧` aparece literalmente no conteúdo do usuário ([ADR-005](DECISIONS.md)).
+4. **Reconciliação de anexos** — o que fazer com um `Attachment` cujo upload via presigned URL nunca se completou.
+5. **Escape de âncoras** — regra para o caso de borda em que `⟦ ⟧` aparece literalmente no conteúdo do usuário.
 
 ---
 
-## 12. Glossário
+## 13. Glossário
 
 - **Modelo Canônico de Conhecimento** — a única representação interna de todo o conhecimento; a fonte da verdade.
 - **Knowledge Object** — qualquer elemento da plataforma, compartilhando a forma de quatro dimensões.

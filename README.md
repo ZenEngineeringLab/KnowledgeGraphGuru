@@ -174,8 +174,7 @@ A Fase 3 vem antes da Fase 4 de propósito: validar o mecanismo de projeções (
 
 ## Documentação
 
-- **[DESIGN.md](DESIGN.md)** — a estratégia de MVP, o Modelo Canônico de Conhecimento, o mapeamento de dados, o pipeline, os eventos e a estratégia de evolução em profundidade.
-- **[DECISIONS.md](DECISIONS.md)** — as decisões de arquitetura (ADRs), com motivo e consequências assumidas.
+- **[DESIGN.md](DESIGN.md)** — a estratégia de MVP, o Modelo Canônico de Conhecimento, o mapeamento de dados, a semântica de escrita, o pipeline, os eventos e a estratégia de evolução em profundidade.
 
 ## Status
 
