@@ -41,25 +41,32 @@ O Modelo Canônico de Conhecimento (§3) é a visão de longo prazo e não muda.
 
 A visão completa trata cada `Heading`, `Paragraph`, `List` e `Callout` como um Knowledge Object independente, formando uma árvore. Isso é poderoso — e é, na prática, construir um *block store* (o modelo de blocos do Notion). É a parte mais cara do sistema.
 
-A fronteira do MVP não é traçada por tamanho, e sim por **natureza do conteúdo**:
+A fronteira do MVP não é traçada por tamanho, e sim por **opacidade**:
 
-> **Prosa e formatação ficam no content.**
-> **Referência a outro objeto vira relation.**
-> **Artefato tipado autocontido vira objeto.**
+> **É artefato quando o corpo está em outra linguagem — opaco à prosa e ao mecanismo de âncora.**
 
 | O que é | Onde vive | Exemplos |
 | --- | --- | --- |
-| Prosa e formatação | Dentro do `content`, em sintaxe | parágrafos, headings, listas, callouts, negrito |
+| Prosa e sua formatação | Dentro do `content`, em sintaxe | parágrafos, headings, listas, callouts, **tabelas**, negrito |
 | Referência a outro objeto | `Relation` + âncora no content (§3.8) | `[[Modelo Canônico]]` |
-| Artefato tipado autocontido | Knowledge Object embutido | tabelas, blocos de código, diagramas Mermaid |
+| Corpo em outra linguagem | Knowledge Object embutido | blocos de código, SQL, Mermaid, Terraform |
 
-O critério é se o corpo daquilo é **prosa** ou **artefato**. O corpo de um callout é prosa — por isso ele fica como sintaxe. O corpo de um bloco de código é código; o de um Mermaid é um diagrama. Esses carregam formato próprio, têm analyzer dedicado (§5) e fronteira sintática inequívoca — merecem existir como objetos.
+O que decide não é o tamanho nem a importância do bloco, e sim **se o conteúdo deve ser lido como prosa**:
+
+| | Corpo é | Varrido por âncoras? | Vive como |
+| --- | --- | --- | --- |
+| Parágrafo, heading, lista, callout, tabela | Prosa | ✅ sim | Sintaxe no `content` |
+| `CodeBlock` (SQL, Mermaid, Terraform) | Outra linguagem | ❌ **não** | Objeto embutido |
+
+Uma tabela é prosa arrumada em grade: suas células contêm texto, e links dentro de células são normais — precisam ser âncoras como qualquer outro ponto do texto. Um bloco de código não: `[[algo]]` dentro de um exemplo de código **não é um link**, e interpretá-lo como tal seria um bug. Ser objeto separado, com content em outro formato, torna o code block naturalmente imune ao parser de âncoras.
+
+Essa imunidade é a justificativa real da exceção — não o fato de o bloco ser "importante".
 
 #### MVP × visão completa
 
 | | MVP (Fase 1) | Visão completa (Fase 4) |
 | --- | --- | --- |
-| Objetos abaixo da nota | Apenas artefatos tipados (folhas) | Toda a árvore de blocos |
+| Objetos abaixo da nota | Apenas corpos opacos (folhas) | Toda a árvore de blocos |
 | Itens por nota | Poucos | Dezenas |
 | Profundidade da árvore | 1 nível, sem aninhamento | Recursiva |
 | Endereçar um parágrafo | ❌ | ✅ |
@@ -67,7 +74,9 @@ O critério é se o corpo daquilo é **prosa** ou **artefato**. O corpo de um ca
 
 **Por que isso não trai o modelo:** as quatro dimensões (§3.1), a identidade imutável, as relations de primeira classe e as collections continuam **exatamente as mesmas**. Um `Paragraph` no futuro será um Knowledge Object com a mesma forma dos que já existem. Descer a granularidade depois é **adicionar mais tipos de filho**, não redesenhar o modelo.
 
-**O que torna isso barato:** artefatos tipados são folhas — não têm filhos, não aninham, e sua fronteira no texto é inequívoca (cerca de código, linhas com pipe). Nada disso vale para parágrafos, cuja delimitação é ambígua e cuja quantidade por nota é uma ordem de grandeza maior. O custo real é `structure.children` passar a existir e a escrita virar multi-item — que já é o caso por causa do lock de slug (§6.1).
+**O que torna isso barato:** corpos opacos são folhas — não têm filhos, não aninham, e sua fronteira no texto é inequívoca (a cerca de código). Nada disso vale para parágrafos, cuja delimitação é ambígua e cuja quantidade por nota é uma ordem de grandeza maior. O custo real é `structure.parent` passar a ser usado e a escrita virar multi-item — que já é o caso por causa do lock de slug (§6.1).
+
+> **Tabela poderia virar objeto** se um dia houver necessidade concreta de consultar o *dado* dela ("todas as tabelas com coluna X"). Aí o problema de ancorar links dentro de células precisará ser resolvido de propósito, e não de surpresa.
 
 **O que se perde temporariamente:** endereçar ou relacionar um trecho de *prosa* dentro de uma nota. Aceitável no MVP; a Fase 4 resolve.
 
@@ -75,13 +84,13 @@ O critério é se o corpo daquilo é **prosa** ou **artefato**. O corpo de um ca
 
 Tipos implementados na Fase 1:
 
-`Collection` · `Note` · `Table` · `CodeBlock`
+`Collection` · `Note` · `CodeBlock`
 
-**`Mermaid` não é um tipo próprio** — é `CodeBlock` com `properties.language = "mermaid"`. Isso mantém um único tipo para todo artefato de código e permite que analyzers se registrem **por linguagem** (`mermaid`, `sql`, `terraform`), que é o modelo de extensão descrito em §5. Dois tipos separados criariam um caso especial sem ganho.
+**`Mermaid` não é um tipo próprio** — é `CodeBlock` com `properties.language = "mermaid"`. Isso mantém um único tipo para todo corpo em outra linguagem e permite que analyzers se registrem **por linguagem** (`mermaid`, `sql`, `terraform`), que é o modelo de extensão descrito em §5. Dois tipos separados criariam um caso especial sem ganho.
 
-Artefatos são embutidos na nota pelo mesmo mecanismo de âncora dos links (§3.8), com relation do tipo `embeds`.
+`CodeBlock` é embutido na nota pelo mesmo mecanismo de âncora dos links (§3.8), com relation do tipo `embeds`.
 
-**Prosa e formatação continuam como sintaxe.** Callouts, listas, headings e ênfase não são objetos — vivem dentro do `content`. São preservados no round-trip e renderizados normalmente; apenas não são endereçáveis como objetos próprios.
+**Prosa e formatação continuam como sintaxe.** Callouts, listas, headings, tabelas e ênfase não são objetos — vivem dentro do `content`. São preservados no round-trip e renderizados normalmente; apenas não são endereçáveis como objetos próprios.
 
 **Sem objetos binários.** `Attachment` fica fora da Fase 1, e com ele saem o Amazon S3, o upload por presigned URL e todo o estado intermediário de um binário que ainda não chegou. O MVP é **DynamoDB + Lambda + API Gateway + EventBridge**, sem armazenamento de blobs.
 
@@ -93,13 +102,13 @@ O MVP entrega **vizinhança de 1 salto**:
 - relations de entrada — *backlinks* ("quem referencia esta nota");
 - pertencimento a collections.
 
-**Não** entrega travessia multi-hop, caminho mais curto ou consultas de grafo. Isso é uma limitação consciente do DynamoDB como armazenamento (§6.1) e é endereçado depois pela **Graph Projection** (§10).
+**Não** entrega travessia multi-hop, caminho mais curto ou consultas de grafo. Isso é uma limitação consciente do DynamoDB como armazenamento (§6.1) e é endereçado depois pela **Graph Projection** (§11).
 
 ### 2.4 Fases
 
 | Fase | Escopo | Entrega |
 | --- | --- | --- |
-| **1 — MVP** | `Note`, `Collection`, `Table`, `CodeBlock`, relations de 1ª classe, API REST, DynamoDB single-table, renderers Markdown + JSON, eventos com log durável | Fatia vertical funcional |
+| **1 — MVP** | `Note`, `Collection`, `CodeBlock`, relations de 1ª classe, API REST, DynamoDB single-table, renderers Markdown + JSON, eventos com log durável | Fatia vertical funcional |
 | **2 — Agentes** | MCP Server, renderer HTML, Markdown Analyzer, Mermaid Analyzer | Consumo por agentes de IA |
 | **3 — Busca** | Search Projection | Valida o padrão orientado a eventos ponta a ponta |
 | **4 — Granularidade fina** | Decompor a prosa (`Heading`, `Paragraph`, `Callout`…) — **somente se o uso real justificar** | Endereçamento de trechos de prosa |
@@ -119,9 +128,9 @@ Todo Knowledge Object compartilha uma forma comum composta por quatro dimensões
 
 | Dimensão | Propósito | Exemplos |
 | --- | --- | --- |
-| **Structure** | Posição na árvore | `parent`, `children`, `order` |
-| **Content** | O payload do objeto | texto, código, mermaid, itens de lista |
-| **Properties** | Metadados específicos do tipo | `title`, `tags`, `aliases`, `language`, `status` |
+| **Structure** | Posição na árvore | `parent` (no MVP; `children`/`order` na Fase 4) |
+| **Content** | O payload do objeto, cuja forma é dada por `format` | prosa com âncoras, código-fonte |
+| **Properties** | Metadados específicos do tipo | `title`, `slug`, `tags`, `aliases`, `language`, `status` |
 | **Relations** | Vínculos semânticos com outros objetos | `references`, `depends_on`, `related_to`, `implements`, `alternative_to` |
 
 Separar essas dimensões é o que permite que o mesmo objeto seja renderizado para qualquer formato, enriquecido por analyzers e projetado em outros armazenamentos — sem que o conteúdo e os relacionamentos se misturem.
@@ -138,11 +147,25 @@ Nenhum dos dois duplica o outro — eles se ligam por referência, através do m
 
 Catálogo da visão completa:
 
-`Collection` · `Note` · `Table` · `CodeBlock` · `Heading` · `Paragraph` · `Callout` · `List` · `Image` · `Attachment` · `Quote`
+`Collection` · `Note` · `CodeBlock` · `Heading` · `Paragraph` · `Callout` · `List` · `Table` · `Image` · `Attachment` · `Quote`
 
-**Implementados no MVP:** `Collection`, `Note`, `Table` e `CodeBlock` (§2.2). Os de prosa existem como sintaxe dentro do content, não como objetos.
+**Implementados no MVP:** `Collection`, `Note` e `CodeBlock` (§2.2). Os de prosa — incluindo `Table` — existem como sintaxe dentro do content, não como objetos.
 
 Novos tipos podem ser introduzidos sem alterar o modelo — um tipo é definido pela sua **forma de content**, pelo seu **analyzer** e por como os **renderers** sabem projetá-lo.
+
+#### Formato do content
+
+`content.format` declara **a forma do `value`** — como interpretar o payload. Não confundir com `properties.language`, que declara **em que linguagem o código está** e é o que seleciona o analyzer (§5).
+
+| Tipo | `content.format` | Forma do `value` | Properties relevantes |
+| --- | --- | --- | --- |
+| `Note` | `ckm/text` | string — prosa com âncoras | `title`, `slug`, `tags`, `status`, `aliases` |
+| `Collection` | `ckm/text` *(opcional)* | string — descrição | `title`, `slug` |
+| `CodeBlock` | `code` | string — código-fonte opaco | `language` |
+
+**Vocabulário fechado no MVP:** `ckm/text` · `code` — validado, como o de relations (§3.7).
+
+A separação evita duplicação: um `CodeBlock` de SQL e um de Mermaid têm o **mesmo** `format: code`, e diferem apenas em `language`. Fosse o formato a carregar a linguagem, a mesma informação estaria em dois lugares.
 
 ### 3.3 Identidade e endereço
 
@@ -166,7 +189,7 @@ Duas coisas que um nome de arquivo acumulava — e que aqui são separadas:
 
 **A unicidade é global**, não por coleção. Isso é imposto pelo modelo: uma nota pertence a N collections simultaneamente (§3.5), então não existe "a pasta dela" para servir de escopo. É o preço direto de coleções extrínsecas.
 
-**Nem todo objeto tem slug.** Ele existe para tipos que alguém endereça pelo nome — `Note` e `Collection`. Artefatos tipados embutidos (`Table`, `CodeBlock`) não têm título e não são citados por nome: são endereçados apenas por `id`, e a restrição de unicidade não se aplica a eles.
+**Nem todo objeto tem slug.** Ele existe para tipos que alguém endereça pelo nome — `Note` e `Collection`. Objetos embutidos (`CodeBlock`) não têm título e não são citados por nome: são endereçados apenas por `id`, e a restrição de unicidade não se aplica a eles.
 
 Renomear muda o slug e não quebra nada, porque as relations usam `id`. O slug antigo passa a constar em `properties.aliases`, que compartilha o mesmo namespace de resolução — links escritos com o nome antigo continuam resolvendo.
 
@@ -195,7 +218,7 @@ O título preserva a grafia original, com acentuação e pontuação. O slug nã
 
 A consequência assumida é que **títulos precisam usar alfabeto latino**. A alternativa — cair para o `id` como slug — produziria endereços ilegíveis e arquivos exportados sem sentido, esvaziando o propósito do slug. Aceitar letras Unicode resolveria o caso internacional ao custo de nomes de arquivo e URLs menos portáveis; é uma abertura retrocompatível, se o uso vier a pedir.
 
-> **A normalização torna a detecção de colisão deliberadamente tolerante.** `Modelo Canônico`, `modelo canonico` e `Modelo, Canônico!` produzem o mesmo slug e colidem entre si (§8.1). Ela não pega apenas duplicata exata — pega **quase-duplicata**, que é justamente o caso em que alguém não percebeu que o conhecimento já existia.
+> **A normalização torna a detecção de colisão deliberadamente tolerante.** `Modelo Canônico`, `modelo canonico` e `Modelo, Canônico!` produzem o mesmo slug e colidem entre si (§9.1). Ela não pega apenas duplicata exata — pega **quase-duplicata**, que é justamente o caso em que alguém não percebeu que o conhecimento já existia.
 
 ### 3.4 Exemplo ilustrativo de uma `Note` no MVP
 
@@ -205,22 +228,21 @@ A consequência assumida é que **títulos precisam usar alfabeto latino**. A al
 {
   "id": "ko_01H...",              // identificador imutável
   "type": "Note",
-  "structure": {
-    "parent": null,
-    "collections": ["ko_01H...arquitetura", "ko_01H...aws"]
-  },
+  "structure": { "parent": null },
   "content": {
     "format": "ckm/text",
     "value": "Conforme o [[rel_01H8Z]], relations são cidadãs de primeira classe."
   },
   "properties": {
     "title": "Modelo canônico",
+    "slug": "modelo-canonico",
     "tags": ["design", "principios"],
     "status": "draft"
   },
   "relations": [
-    { "id": "rel_01H8Z", "type": "references", "target": "ko_01H...other",   "inline": true  },
-    { "id": "rel_01H8W", "type": "depends_on", "target": "ko_01H...another", "inline": false }
+    { "id": "rel_01H8Z", "type": "references",   "target": "ko_01H...other", "inline": true  },
+    { "id": "rel_01H8W", "type": "depends_on",   "target": "ko_01H...another", "inline": false },
+    { "id": "rel_01H8V", "type": "in_collection","target": "ko_01H...arquitetura", "inline": false }
   ],
   "meta": {
     "createdAt": "2026-07-21T00:00:00Z",
@@ -232,16 +254,33 @@ A consequência assumida é que **títulos precisam usar alfabeto latino**. A al
 
 `meta` carrega metadados **técnicos** (auditoria e controle de concorrência), distintos de `properties`, que são metadados **de conhecimento**.
 
+**`structure` tem apenas `parent` no MVP.** Não há `children` nem `order`: a ordem dos objetos embutidos vem da **posição da âncora** no content, e mantê-la também em `order` criaria uma segunda fonte de verdade para o mesmo fato, com risco de divergirem. `children` é derivável (§6.1, GSI1). Ambos voltam na Fase 4, quando houver árvore de verdade.
+
+**Pertencer a uma coleção é uma relation**, não um campo de `structure` — coleção é agrupamento *extrínseco* (§3.5), e um único mecanismo de arestas já resolve relations, backlinks e coleções (§6.1).
+
+**Este JSON é uma visão montada na leitura.** No DynamoDB, o objeto e cada uma de suas relations são **itens separados** (§6.1); a API os reúne para responder. O mesmo vale na escrita, onde objetos embutidos chegam num único payload (§8) e são gravados como itens distintos na mesma transação.
+
+#### Vocabulário de `status`
+
+Conjunto fechado no MVP: `stub` · `draft` · `published`. O default é `draft`.
+
+**`stub` é atribuído apenas pelo sistema** (§10.2) — o cliente nunca o envia. É o que marca uma nota criada por um link para conhecimento que ainda não foi escrito.
+
 ### 3.5 Structure vs. Collections
 
 Duas noções diferentes de "conter" coexistem:
 
-- **Structure** (`parent`/`children`/`order`) — a árvore *intrínseca* de um objeto. No MVP, rasa; a partir da Fase 4, uma `Note` contém `Heading`s e `Paragraph`s.
+- **Structure** (`parent`) — a árvore *intrínseca* de um objeto. No MVP tem um nível, com os corpos opacos embutidos; a partir da Fase 4, uma `Note` contém `Heading`s e `Paragraph`s, e `children`/`order` passam a existir.
 - **Collections** — agrupamento *extrínseco*. Uma `Collection` é ela mesma um Knowledge Object, e uma nota pode pertencer a **muitas coleções simultaneamente**. Isso substitui a árvore de diretórios físicos, que deixa de existir.
 
 ### 3.6 Properties substituem o Frontmatter
 
-O Frontmatter deixa de existir internamente. Tudo que viveria no frontmatter agora vive em **Properties**, no objeto. O renderer Markdown ainda vai *emitir* frontmatter na exportação, puramente para manter compatibilidade com ferramentas externas.
+O Frontmatter deixa de existir internamente. Tudo que viveria no frontmatter agora vive em **Properties**, no objeto.
+
+A conversão é nos dois sentidos:
+
+- **Na importação**, o parser lê o frontmatter e o converte em `properties`. Chaves que o modelo não conhece são **preservadas** em `properties`, não descartadas — conhecimento que veio junto não se perde por não ter sido previsto.
+- **Na exportação**, o renderer Markdown re-emite o frontmatter, puramente para manter compatibilidade com ferramentas externas.
 
 ### 3.7 Relations inline vs. standalone
 
@@ -331,7 +370,7 @@ Import    [[Modelo Canônico]]  →  resolve título → id  →  [[rel_01H8Z]] 
 Export    [[rel_01H8Z]]        →  lê o título ATUAL do alvo  →  [[Modelo Canônico]]
 ```
 
-Links para notas inexistentes (`[[Nota Que Não Existe]]`) criam uma `Note` com `status: "stub"`, mantendo a regra de que toda relation aponta para um objeto real (§8.2).
+Links para notas inexistentes (`[[Nota Que Não Existe]]`) criam uma `Note` com `status: "stub"`, mantendo a regra de que toda relation aponta para um objeto real (§9.2).
 
 Consequências do mecanismo:
 
@@ -391,7 +430,7 @@ content:   "Veja:\n\n[[rel_01H8Z]]"
 relations: { id: "rel_01H8Z", type: "embeds", target: "ko_cb01" }
 objeto:    { id: "ko_cb01", type: "CodeBlock",
              properties: { language: "sql" },
-             content:    { format: "sql", value: "SELECT * FROM foo" },
+             content:    { format: "code", value: "SELECT * FROM foo" },
              structure:  { parent: "ko_nota" } }
         ↓ renderer
 Markdown de saída — a cerca reconstruída a partir do objeto
@@ -421,7 +460,7 @@ Duas coisas diferentes usam `embeds`, e elas se comportam de forma oposta na rem
 
 O que distingue os dois **não é o tipo da relation** — é o `structure.parent`. O `CodeBlock` tem `parent` apontando para a nota; a nota transcluída tem `parent` nulo, porque é independente.
 
-`embeds` e `parent` são fatos **ortogonais**: um diz *"renderiza aqui"*, o outro diz *"pertence a, e morre junto"*. É por isso que a cascata estrutural (§8.3) é enunciada sobre `parent`, e não sobre o tipo da relation.
+`embeds` e `parent` são fatos **ortogonais**: um diz *"renderiza aqui"*, o outro diz *"pertence a, e morre junto"*. É por isso que a cascata estrutural (§9.3) é enunciada sobre `parent`, e não sobre o tipo da relation.
 
 ---
 
@@ -469,7 +508,9 @@ Um **analyzer** inspeciona o content de um objeto e **enriquece o grafo de conhe
 | **Mermaid Analyzer** | `CodeBlock` · `language: mermaid` | 2 | Relacionamentos do diagrama → relations standalone |
 | **SQL / Terraform / Java** | `CodeBlock` · `language: sql`… | pós-MVP | Relacionamentos estruturais a partir de código |
 
-Analyzers rodam dentro do pipeline de ingestão (§7) e se registram por **tipo de objeto** e, no caso de `CodeBlock`, por **linguagem**. É por isso que Mermaid não é um tipo próprio (§2.2): um único `CodeBlock` com `properties.language` dá o ponto de extensão para qualquer linguagem, sem inflar o catálogo de tipos.
+O analyzer é selecionado por `properties.language`, não por `content.format` — todos os `CodeBlock` compartilham `format: code` (§3.2).
+
+Analyzers rodam dentro do pipeline de ingestão (§8) e se registram por **tipo de objeto** e, no caso de `CodeBlock`, por **linguagem**. É por isso que Mermaid não é um tipo próprio (§2.2): um único `CodeBlock` com `properties.language` dá o ponto de extensão para qualquer linguagem, sem inflar o catálogo de tipos.
 
 Adicionar um analyzer enriquece o conhecimento sem alterar o modelo.
 
@@ -517,7 +558,7 @@ Access patterns que o MVP precisa suportar:
 
 **Consistência:** as relations de saída (padrões 2 e 5) são fortemente consistentes, pois vivem na partição do próprio objeto. Já os **backlinks (padrões 3 e 4) são eventualmente consistentes por contrato** — GSIs do DynamoDB são atualizados de forma assíncrona, e a API não promete que uma relation recém-criada apareça imediatamente no alvo.
 
-**Limitação assumida:** o DynamoDB resolve bem **um salto**. Travessia multi-hop exige N queries sequenciais e não é objetivo do MVP (§2.3) — a Graph Projection (§10) endereça isso quando houver necessidade real.
+**Limitação assumida:** o DynamoDB resolve bem **um salto**. Travessia multi-hop exige N queries sequenciais e não é objetivo do MVP (§2.3) — a Graph Projection (§11) endereça isso quando houver necessidade real.
 
 **Limite operacional:** `TransactWriteItems` suporta no máximo 100 itens. Uma escrita típica no MVP é de poucos itens — a nota, seu lock de slug, os artefatos tipados embutidos e as arestas —, bem dentro do limite. Este teto é uma das razões concretas para manter a prosa no content: decompor parágrafos levaria uma nota longa a estourá-lo (§2.1).
 
@@ -535,12 +576,103 @@ Consequências de design:
 
 - As chaves do DynamoDB **não** precisam de uma dimensão de tenant/workspace.
 - A autorização (IAM + nível de API) protege a *instância* inteira, não recortes de conhecimento por usuário.
-- Escritas concorrentes são raras por definição, o que reduz muito a pressão sobre o controle de concorrência (§8.4).
+- Escritas concorrentes são raras por definição, o que reduz muito a pressão sobre o controle de concorrência (§9.4).
 - Multi-tenancy permanece um não-objetivo (§1). Se necessário no futuro, introduzir escopo de tenant nas chaves e nos eventos é uma evolução conhecida, mas não prevista.
 
 ---
 
-## 7. Pipeline de ingestão
+## 7. API
+
+A API é o único caminho de escrita (§8). Esta seção descreve sua superfície no MVP.
+
+### 7.1 Objetos
+
+| Método | Rota | Nota |
+| --- | --- | --- |
+| `POST` | `/notes` | Cria. Objetos embutidos vão no mesmo payload (§7.3) |
+| `GET` | `/notes/{id}` | `?render=json\|markdown` |
+| `PUT` | `/notes/{id}` | Exige `version` no corpo (§9.4) |
+| `DELETE` | `/notes/{id}` | Cascateia (§9.3) |
+| `POST` | `/collections` | |
+| `GET` `PUT` `DELETE` | `/collections/{id}` | |
+| `GET` | `/objects/{id}` | Leitura genérica — alcança também objetos embutidos |
+| `GET` | `/objects?type=&cursor=` | Listagem paginada por tipo → GSI2 (§6.1) |
+
+### 7.2 Grafo
+
+| Método | Rota | Serve |
+| --- | --- | --- |
+| `GET` | `/objects/{id}/relations` | Relations de saída |
+| `GET` | `/objects/{id}/backlinks` | Relations de entrada — **eventualmente consistente** (§6.1) |
+| `GET` | `/collections/{id}/members` | Membros da coleção |
+| `POST` | `/objects/{id}/relations` | Cria relation **standalone** |
+| `DELETE` | `/objects/{id}/relations/{relId}` | Remove relation standalone |
+
+A regra que organiza isso:
+
+> **Relation inline se gerencia pelo corpo da nota. Relation standalone tem rota própria.**
+
+A inline está acoplada ao texto: criar ou remover uma **altera o content** (§9.3), então ela só faz sentido dentro de uma escrita da nota inteira. A standalone é independente — e um agente precisa poder acrescentar um `depends_on` sem reescrever a nota.
+
+Disso cai uma consequência: **adicionar uma nota a uma coleção não precisa de rota especial**. É uma relation standalone como qualquer outra:
+
+```
+POST /objects/ko_nota/relations
+{ "type": "in_collection", "target": "ko_colecao" }
+```
+
+Um único mecanismo de arestas serve relations, backlinks e coleções — coerente com §6.1.
+
+### 7.3 Criação com objeto embutido
+
+O cliente **não inventa `id`s**. Ele usa referências locais (`#ref`), que a API resolve para ULIDs reais ao gravar:
+
+```json
+POST /notes
+{
+  "properties": { "title": "Consulta de auditoria" },
+  "content": { "format": "ckm/text", "value": "Use:\n\n[[#r1]]" },
+  "relations": [
+    { "ref": "#r1", "type": "embeds", "target": "#cb1", "inline": true }
+  ],
+  "embedded": [
+    { "ref": "#cb1", "type": "CodeBlock",
+      "properties": { "language": "sql" },
+      "content": { "format": "code", "value": "SELECT ..." } }
+  ]
+}
+```
+
+A resposta devolve o objeto já com os `id`s atribuídos, e o `content` com as âncoras resolvidas.
+
+**Objetos embutidos não têm rota de escrita própria** — não existem fora do pai (§9.3). São lidos por `GET /objects/{id}` e escritos apenas junto da nota que os contém, na mesma transação.
+
+### 7.4 Importação
+
+| Método | Rota | Recebe |
+| --- | --- | --- |
+| `POST` | `/import/markdown` | Markdown bruto |
+
+O adaptador aceita `[[Título]]` e resolve para âncoras; a rota canônica não (§3.8, *Validação por rota*).
+
+### 7.5 Erros
+
+Envelope único:
+
+```json
+{ "error": "<código>", "message": "…", "…": "contexto" }
+```
+
+| Status | Código | Quando |
+| --- | --- | --- |
+| `400` | `validation_error` | Schema, vocabulário fechado, âncora órfã, slug que normaliza para vazio |
+| `404` | `not_found` | |
+| `409` | `slug_conflict` | Título colide (§9.1) — traz `existing` com content e version |
+| `409` | `version_conflict` | `version` desatualizada (§9.4) |
+
+---
+
+## 8. Pipeline de ingestão
 
 Toda escrita flui pela API: **nenhuma escrita no modelo de conhecimento ocorre fora dela.** No MVP a regra vale sem exceção — não há armazenamento binário (§2.2).
 
@@ -570,13 +702,13 @@ No MVP, o estágio *Analyzers* é um passo vazio (pass-through) — o pipeline j
 
 ---
 
-## 8. Semântica de escrita e ciclo de vida
+## 9. Semântica de escrita e ciclo de vida
 
 As regras que governam o que acontece ao criar, importar, atualizar e remover conhecimento. Todas existem para sustentar uma única invariante:
 
 > **Toda relation aponta para um objeto que existe, e toda âncora aponta para uma relation que existe.**
 
-### 8.1 Colisão de slug: a plataforma recusa, não resolve
+### 9.1 Colisão de slug: a plataforma recusa, não resolve
 
 Duas notas com o mesmo título não são um problema técnico de nomes — são um **sinal semântico**. Ou representam o mesmo conhecimento e deveriam ser uma só, ou os títulos estão ruins e o vocabulário do acervo está degradando. Nos dois casos, quem sabe a resposta é o autor.
 
@@ -605,7 +737,7 @@ Uma escrita cujo slug já existe recebe `409` com tudo que o cliente precisa par
 }
 ```
 
-O `content` vem inteiro porque o cliente faria esse `GET` em todos os casos. O `version` é o que ele devolve na atualização, para o controle otimista (§8.4) — se outra escrita entrar no meio, a operação falha limpa em vez de sobrescrever.
+O `content` vem inteiro porque o cliente faria esse `GET` em todos os casos. O `version` é o que ele devolve na atualização, para o controle otimista (§9.4) — se outra escrita entrar no meio, a operação falha limpa em vez de sobrescrever.
 
 #### Resolução
 
@@ -622,17 +754,17 @@ Todo o mecanismo custa **um código de status e um payload bem desenhado**. Nenh
 
 **Limitação conhecida:** resolver conflito a conflito não escala para importar um acervo inteiro. Um vault com centenas de arquivos exigirá uma *sessão de importação* que acumula as pendências e as apresenta em lote — fora do escopo da Fase 1, cujo alvo é a importação de documento único.
 
-### 8.2 Criação e importação
+### 9.2 Criação e importação
 
 **Links não resolvidos criam notas stub.** Importar `[[Nota Que Não Existe]]` cria uma `Note` com `properties.status = "stub"` e estabelece a relation normalmente.
 
 Isso preserva o fluxo de escrita do ecossistema Markdown — citar algo antes de escrevê-lo — sem abrir exceção na invariante. A nota stub passa a ser um item de trabalho visível no próprio grafo, e escrever nela depois é apenas atualizá-la: o `id` já existe, nenhum vínculo precisa ser refeito.
 
-**Escrever numa stub não é colisão.** Tecnicamente o slug já está ocupado, mas uma stub não tem conteúdo — não há nada a reconciliar. Preencher a lacuna é o comportamento pretendido, então essa escrita não devolve `409` (§8.1).
+**Escrever numa stub não é colisão.** Tecnicamente o slug já está ocupado, mas uma stub não tem conteúdo — não há nada a reconciliar. Preencher a lacuna é o comportamento pretendido, então essa escrita não devolve `409` (§9.1).
 
 **Cada ocorrência é uma relation.** Citar a mesma nota duas vezes no mesmo texto gera duas relations, com `id` e âncoras distintos. Cada ocorrência é uma asserção própria, em uma posição própria; modelar como uma relation com múltiplas âncoras complicaria escrita e remoção sem benefício. A deduplicação fica a cargo das consultas — "quais notas esta referencia" agrupa por alvo.
 
-### 8.3 Remoção
+### 9.3 Remoção
 
 **Deletar um objeto cascateia nas relations.** As que **apontam para ele** também são removidas, com um `RelationRemoved` emitido para cada uma. Um grafo com alvos inexistentes contaminaria backlinks, renderização e toda projeção futura.
 
@@ -654,7 +786,7 @@ A distinção entre as duas cascatas:
 
 Como isso altera o `content` do objeto de origem, a remoção incrementa a versão dele e emite `KnowledgeUpdated`. O texto ao redor do link é preservado; some apenas o vínculo.
 
-### 8.4 Concorrência
+### 9.4 Concorrência
 
 Controle **otimista por objeto**: `meta.version` é incrementado a cada escrita e validado por condição no `PutItem`/`UpdateItem`. Uma escrita sobre versão desatualizada falha, e o cliente reconcilia.
 
@@ -664,7 +796,7 @@ Isso funciona porque a árvore tem um nível e os filhos são folhas sem existê
 
 ---
 
-## 9. Eventos
+## 10. Eventos
 
 Toda alteração publica eventos de domínio via EventBridge. Os eventos são o ponto de extensão que permite às projeções ficarem em sincronia sem que o núcleo precise conhecê-las.
 
@@ -676,23 +808,27 @@ Eventos principais:
 - `RelationCreated`
 - `RelationRemoved`
 
-### 9.1 Log durável e replay
+### 10.1 Log durável e replay
 
-EventBridge é um **barramento**, não um log durável — por padrão, eventos publicados não ficam disponíveis para reprocessamento. Como a promessa de reconstruir projeções do zero (§10) depende disso, o MVP habilita **EventBridge Archive & Replay** desde o início.
+EventBridge é um **barramento**, não um log durável — por padrão, eventos publicados não ficam disponíveis para reprocessamento. Como a promessa de reconstruir projeções do zero (§11) depende disso, o MVP habilita **EventBridge Archive & Replay** desde o início.
 
 Consequência: qualquer projeção pode ser criada ou reconstruída depois, reprocessando o arquivo — sem que o núcleo precise ser alterado.
 
 > A fonte da verdade continua sendo o grafo no DynamoDB. O arquivo de eventos é o mecanismo de *reconstrução de projeções*, não um event store canônico.
 
-### 9.2 Envelope
+### 10.2 Envelope
 
-Todo evento carrega, no mínimo: `eventId`, `eventType`, `eventVersion`, `occurredAt`, `objectId` e o payload relevante. `eventId` serve como chave de idempotência para consumidores.
+Todo evento carrega, no mínimo: `eventId`, `eventType`, `eventVersion`, `occurredAt`, `objectId`, `correlationId` e o payload relevante. `eventId` serve como chave de idempotência para consumidores.
+
+**Granularidade:** um evento **por objeto** e **por relation**, todos emitidos a partir da mesma transação. Criar uma nota com dois blocos de código produz **três `KnowledgeCreated` e dois `RelationCreated`** — cinco eventos.
+
+**`correlationId`** é compartilhado por todos os eventos originados de uma mesma escrita lógica. É o que permite ao consumidor reconhecer que os cinco eventos acima são um só fato, sem precisar inferir por proximidade de timestamp.
 
 **Ordenação:** o EventBridge não garante ordem. As projeções devem ser tolerantes a reordenação — na prática, aplicando eventos de forma idempotente e usando `meta.version` do objeto para descartar atualizações obsoletas.
 
 ---
 
-## 10. Evolução: projeções
+## 11. Evolução: projeções
 
 A arquitetura é desenhada para que novas **projeções** — visões otimizadas para leitura, construídas consumindo eventos — possam ser adicionadas **sem alterar o modelo canônico**. Uma projeção é estado derivado; o grafo no DynamoDB continua sendo a fonte da verdade.
 
@@ -703,13 +839,13 @@ A arquitetura é desenhada para que novas **projeções** — visões otimizadas
 | **Graph Projection** | 5 | Travessia multi-hop e consultas nativas de grafo | Neo4j / Amazon Neptune |
 | **Analytics Projection** | 5 | Métricas e relatórios | armazenamento analítico |
 
-Cada projeção assina o stream de eventos (§9), constrói sua própria visão e pode ser reconstruída do zero via replay do arquivo (§9.1).
+Cada projeção assina o stream de eventos (§10), constrói sua própria visão e pode ser reconstruída do zero via replay do arquivo (§10.1).
 
 A **Search Projection** é deliberadamente a primeira: ela valida o mecanismo de projeções ponta a ponta com custo baixo, antes de qualquer investimento maior.
 
 ---
 
-## 11. Stack e organização do código
+## 12. Stack e organização do código
 
 | Camada | Decisão |
 | --- | --- |
@@ -729,7 +865,7 @@ O `core` livre de AWS é a materialização do princípio *storage is an impleme
 
 ---
 
-## 12. Glossário
+## 13. Glossário
 
 - **Modelo Canônico de Conhecimento** — a única representação interna de todo o conhecimento; a fonte da verdade.
 - **Knowledge Object** — qualquer elemento da plataforma, compartilhando a forma de quatro dimensões.
@@ -739,13 +875,13 @@ O `core` livre de AWS é a materialização do princípio *storage is an impleme
 - **Relation standalone** — relation puramente semântica, sem posição no conteúdo (§3.7).
 - **Âncora** — `[[rel_id]]` no `content`, marcando a posição de uma relation inline e referenciando-a por `id`. Nunca guarda o título do alvo (§3.8).
 - **Slug** — título normalizado (`Modelo Canônico` → `modelo-canonico`) que serve de endereço único e legível do objeto; derivado automaticamente, nunca digitado. Só existe para tipos endereçados por nome (§3.3).
-- **Artefato tipado** — Knowledge Object autocontido embutido numa nota, com formato próprio e fronteira sintática inequívoca: `Table`, `CodeBlock`. Distingue-se da prosa, que fica como sintaxe no content (§2.1).
-- **Stub** — nota criada automaticamente por um link para conhecimento que ainda não foi escrito (§8.2).
+- **Corpo opaco** — conteúdo em outra linguagem, que não deve ser lido como prosa nem varrido pelo parser de âncoras. No MVP, `CodeBlock`. É o critério que define quando algo vira objeto embutido em vez de sintaxe (§2.1).
+- **Stub** — nota criada automaticamente por um link para conhecimento que ainda não foi escrito (§9.2).
 - **Renderer** — uma projeção pura e unidirecional dos objetos em uma representação (Markdown, HTML, JSON, MCP).
 - **Analyzer** — um componente que enriquece o grafo a partir do content de um objeto.
 - **Projeção** — uma visão otimizada para leitura, derivada do consumo de eventos (search, vector, graph, analytics).
 - **Collection** — um Knowledge Object usado para agrupar outros objetos; substitui os diretórios físicos.
-- **Prosa × artefato** — o critério que define a fronteira do objeto: prosa e sua formatação ficam como sintaxe no content; artefatos tipados autocontidos viram objetos embutidos (§2.1).
+- **Opacidade** — o critério que define a fronteira do objeto: prosa e sua formatação (inclusive tabelas) ficam como sintaxe no content; corpos em outra linguagem viram objetos embutidos (§2.1).
 
 ---
 
