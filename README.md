@@ -28,6 +28,7 @@ Markdown, HTML, JSON, MCP e outros formatos são apenas **representações difer
 | Pastas são diretórios físicos | Collections são Knowledge Objects |
 | Frontmatter vive no arquivo | Properties vivem no objeto |
 | Links são texto | Relations são cidadãs de primeira classe |
+| Renomear uma nota quebra os links | Renomear uma nota não quebra nada |
 
 ## Princípios arquiteturais
 
@@ -52,6 +53,7 @@ Isso preserva integralmente o modelo canônico — as quatro dimensões, a ident
 
 - ✅ `Note`, `Collection` e `Attachment` como Knowledge Objects
 - ✅ **Relations de primeira classe**, tipadas e por `id` imutável
+- ✅ Relations **inline** (ancoradas no texto) e **standalone** (puramente semânticas)
 - ✅ Uma nota em múltiplas coleções simultaneamente
 - ✅ Vizinhança de **1 salto** no grafo — referências e *backlinks*
 - ✅ API REST como único caminho de escrita
@@ -79,6 +81,21 @@ Todo elemento da plataforma é um Knowledge Object. Todos compartilham um modelo
 - **Relations** — vínculos semânticos (`references`, `depends_on`, `related_to`, `implements`, `alternative_to`)
 
 O catálogo completo de tipos previstos inclui `Collection`, `Note`, `Heading`, `Paragraph`, `Callout`, `List`, `Table`, `Code Block`, `Mermaid`, `Image`, `Attachment` e `Quote`. O MVP implementa `Collection`, `Note` e `Attachment`.
+
+### Relations ancoradas no conteúdo
+
+Um link no meio de um texto é duas coisas ao mesmo tempo: uma **relação semântica** e uma **posição no conteúdo**. O modelo trata as duas sem confundi-las:
+
+> **Content guarda a posição. Relations guardam o significado.**
+
+O conteúdo carrega uma **âncora** que referencia a relation por `id`; a relation carrega o alvo e o tipo. Como o texto nunca guarda o título do alvo, renomear uma nota faz todos os links que apontam para ela se re-renderizarem corretamente — sem reescrever uma linha de conteúdo.
+
+```
+Import    [[Modelo Canônico]]   →  resolve título → id  →  ⟦rel_01H8Z⟧ + relation
+Export    ⟦rel_01H8Z⟧           →  lê o título ATUAL do alvo  →  [[Modelo Canônico]]
+```
+
+Relations que não têm posição no texto — como uma seta extraída de um diagrama Mermaid — são igualmente cidadãs de primeira classe, apenas sem âncora. Veja [DESIGN.md §3.8](DESIGN.md).
 
 ### Organização
 
@@ -126,7 +143,9 @@ Persistência
 Eventos
 ```
 
-Toda escrita **precisa** passar pela API — não há escrita direta no armazenamento. A API é responsável por validação, parsing, enriquecimento, criação de relacionamentos, indexação, persistência e publicação de eventos.
+Toda escrita **precisa** passar pela API — nenhuma escrita no modelo de conhecimento ocorre fora dela. A API é responsável por validação, parsing, enriquecimento, criação de relacionamentos, indexação, persistência e publicação de eventos.
+
+**Stack:** TypeScript/Node em Lambda, infraestrutura com AWS CDK, monorepo com um pacote `core` livre de dependências AWS — modelo, parser e renderers testáveis sem nuvem.
 
 ## Para humanos e agentes
 
@@ -156,10 +175,11 @@ A Fase 3 vem antes da Fase 4 de propósito: validar o mecanismo de projeções (
 ## Documentação
 
 - **[DESIGN.md](DESIGN.md)** — a estratégia de MVP, o Modelo Canônico de Conhecimento, o mapeamento de dados, o pipeline, os eventos e a estratégia de evolução em profundidade.
+- **[DECISIONS.md](DECISIONS.md)** — as decisões de arquitetura (ADRs), com motivo e consequências assumidas.
 
 ## Status
 
-🚧 Fase inicial de design. O modelo e a arquitetura estão definidos; a implementação da Fase 1 ainda não começou.
+🚧 Design concluído para a Fase 1. Modelo, arquitetura e decisões técnicas estão registrados; a implementação ainda não começou.
 
 **Modo de operação (MVP):** single-user / self-hosted — uma base de conhecimento por instância.
 

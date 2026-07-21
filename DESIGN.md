@@ -106,6 +106,12 @@ Todo Knowledge Object compartilha uma forma comum composta por quatro dimensões
 
 Separar essas dimensões é o que permite que o mesmo objeto seja renderizado para qualquer formato, enriquecido por analyzers e projetado em outros armazenamentos — sem que o conteúdo e os relacionamentos se misturem.
 
+**Content e Relations não são independentes: eles conversam.** Um link no meio de um texto é, ao mesmo tempo, uma relação semântica *e* uma posição no conteúdo. A regra que governa essa conversa:
+
+> **Content guarda a posição. Relations guardam o significado.**
+
+Nenhum dos dois duplica o outro — eles se ligam por referência, através do mecanismo de âncora (§3.8).
+
 > **No MVP**, `Structure` de uma `Note` é rasa (sem filhos), já que a nota é atômica (§2.1). A dimensão existe e é preenchida — apenas não há sub-objetos ainda.
 
 ### 3.2 Tipos de objeto
@@ -139,8 +145,8 @@ Este é o diferencial estrutural frente a Markdown + wikilinks, onde o link é t
     "collections": ["ko_01H...arquitetura", "ko_01H...aws"]
   },
   "content": {
-    "format": "markdown",
-    "value": "# Modelo canônico\n\nRelations são cidadãs de primeira classe..."
+    "format": "ckm/text",
+    "value": "Conforme o ⟦rel_01H8Z⟧, relations são cidadãs de primeira classe."
   },
   "properties": {
     "title": "Modelo canônico",
@@ -148,8 +154,8 @@ Este é o diferencial estrutural frente a Markdown + wikilinks, onde o link é t
     "status": "draft"
   },
   "relations": [
-    { "type": "references", "target": "ko_01H...other" },
-    { "type": "depends_on", "target": "ko_01H...another" }
+    { "id": "rel_01H8Z", "type": "references", "target": "ko_01H...other",   "inline": true  },
+    { "id": "rel_01H8W", "type": "depends_on", "target": "ko_01H...another", "inline": false }
   ],
   "meta": {
     "createdAt": "2026-07-21T00:00:00Z",
@@ -171,6 +177,64 @@ Duas noções diferentes de "conter" coexistem:
 ### 3.6 Properties substituem o Frontmatter
 
 O Frontmatter deixa de existir internamente. Tudo que viveria no frontmatter agora vive em **Properties**, no objeto. O renderer Markdown ainda vai *emitir* frontmatter na exportação, puramente para manter compatibilidade com ferramentas externas.
+
+### 3.7 Relations inline vs. standalone
+
+Nem toda relation tem posição no texto. O modelo distingue dois casos:
+
+| | **Inline** | **Standalone** |
+| --- | --- | --- |
+| Origem | Um link escrito no meio do conteúdo | Declarada via API ou extraída por um analyzer |
+| Exemplo | `[[Modelo Canônico]]` dentro de um parágrafo | `depends_on`, ou uma seta de um diagrama Mermaid |
+| Posição no content | ✅ ancorada (§3.8) | ❌ nenhuma |
+| Campo | `inline: true` | `inline: false` |
+
+Ambas são relations de primeira classe, com o mesmo peso no grafo. A diferença é apenas se existe — ou não — um ponto no conteúdo onde ela se manifesta.
+
+### 3.8 Mecanismo de âncora
+
+Uma relation inline precisa ser renderizada **no lugar certo** do texto. Duas abordagens ingênuas falham:
+
+- **Guardar `[[Título]]` literal no content** — o link volta a ser texto. Renomear o alvo quebra o vínculo, e Markdown volta a ser o formato de armazenamento. Contraria os princípios 2 e 5.
+- **Guardar offsets de caractere na relation** — qualquer edição do texto invalida todas as posições seguintes.
+
+> **Granularidade não resolve isso.** Decompor o conteúdo em `Paragraph` não preserva a posição de um link: um parágrafo com dois links continua sendo um único bloco de texto com dois links no meio dele. Âncoras são necessárias em **qualquer** nível de granularidade — e, com elas, a `Note` atômica do MVP não perde nada de posição. O que a granularidade compra é outra coisa: endereçar um bloco (`[[Nota#^bloco]]`), transcluí-lo e dar-lhe metadados próprios.
+
+**Solução adotada:** o content carrega um **token de âncora** que referencia a relation pelo seu `id`. A relation carrega o alvo e o tipo. Nenhum dos dois duplica o outro.
+
+O formato `ckm/text` é uma **string legível**: sintaxe inline de Markdown (`**negrito**`, `` `código` ``) mais âncoras delimitadas por `⟦ ⟧` (U+27E6 / U+27E7) — caracteres que praticamente não ocorrem em texto natural, o que reduz o escaping a um caso de borda.
+
+```json
+{
+  "content": {
+    "format": "ckm/text",
+    "value": "Conforme o ⟦rel_01H8Z⟧, relations são cidadãs de primeira classe."
+  },
+  "relations": [
+    { "id": "rel_01H8Z", "type": "references", "target": "ko_01H...", "inline": true }
+  ]
+}
+```
+
+Manter o content como string legível — em vez de um AST de nós inline — é uma escolha deliberada por inspecionabilidade e diffs úteis no git ([ADR-005](DECISIONS.md)). O AST inline fica para a Fase 4, junto com a decomposição em blocos: granularidade vertical e horizontal são a mesma máquina.
+
+Consequências:
+
+- **Relations passam a ter identidade própria** (`id`). Isso não é acessório: um cidadão de primeira classe tem identidade. Antes, relations eram pares anônimos `{type, target}`.
+- **O content deixa de ser Markdown válido** e passa a ser conteúdo canônico com tokens — daí `content.format: "ckm/text"`. Isso não é um efeito colateral indesejado: é o princípio *"Markdown is a rendering format"* sendo cumprido literalmente. Se o content fosse Markdown válido, Markdown seria o formato de armazenamento.
+- **O texto nunca guarda o título do alvo.** Renomear a nota alvo faz todos os links se re-renderizarem corretamente, sem reescrever nenhum content. É o comportamento que Markdown puro não entrega.
+- **Alias é opcional** (`[[Título|texto exibido]]`): quando informado, vira um campo da relation; quando ausente, o renderer resolve o título atual do alvo.
+- **Embeds usam o mesmo mecanismo** — `![[imagem]]` é uma âncora cuja relation tem tipo `embeds`.
+- **Sobrevive à Fase 4** — quando o conteúdo for decomposto em blocos, a âncora funciona igual dentro de um `Paragraph`.
+
+#### Ciclo de importação e exportação
+
+```
+Import    [[Modelo Canônico]]   →  resolve título → id  →  ⟦rel_01H8Z⟧  +  relation
+Export    ⟦rel_01H8Z⟧           →  lê o título ATUAL do alvo           →  [[Modelo Canônico]]
+```
+
+Links para notas inexistentes (`[[Nota Que Não Existe]]`) criam uma `Note` com `status: "stub"`, mantendo a regra de que toda relation aponta para um objeto real ([ADR-012](DECISIONS.md)).
 
 ---
 
@@ -196,7 +260,8 @@ Isso é uma consequência inevitável de ter um modelo canônico: Markdown tem m
 O que é garantido no round-trip:
 - ✅ o conteúdo semântico da nota;
 - ✅ properties (via frontmatter na exportação);
-- ✅ relations (como links, resolvidos por `id`).
+- ✅ relations, **inclusive sua posição no texto**, via âncoras (§3.8);
+- ✅ links sempre apontando para o alvo correto — mesmo que ele tenha sido renomeado desde a importação.
 
 O que **não** é garantido:
 - ❌ espaçamento, quebras de linha e estilo sintático originais;
@@ -213,13 +278,13 @@ Um **analyzer** inspeciona o content de um objeto e **enriquece o grafo de conhe
 
 | Analyzer | Fase | O que extrai |
 | --- | --- | --- |
-| **Markdown Analyzer** | 2 | Links → relations, tags, título |
-| **Mermaid Analyzer** | 2 | Relacionamentos expressos no diagrama → relations |
+| **Markdown Analyzer** | 2 | Tags, títulos, estrutura de headings |
+| **Mermaid Analyzer** | 2 | Relacionamentos expressos no diagrama → relations standalone |
 | **Terraform / SQL / Java** | pós-MVP | Relacionamentos estruturais a partir de código |
 
 Analyzers rodam dentro do pipeline de ingestão (§7). Cada tipo de objeto pode ter um analyzer dedicado; adicionar um enriquece o conhecimento sem alterar o modelo.
 
-> No MVP (Fase 1), as relations são **explícitas** — informadas pelo cliente via API. A extração automática entra na Fase 2, junto com os analyzers.
+> **Onde entram as relations no MVP.** A resolução de wikilinks (`[[...]]` → âncora + relation, §3.8) **não** é trabalho de analyzer: é responsabilidade do **parser Markdown**, e faz parte da Fase 1, já que importação/exportação Markdown é escopo do MVP. Relations standalone também podem ser informadas explicitamente pelo cliente via API na Fase 1. O que a Fase 2 acrescenta é o *enriquecimento automático* — descobrir relations que ninguém escreveu, como as arestas de um diagrama Mermaid.
 
 ---
 
@@ -231,18 +296,32 @@ Analyzers rodam dentro do pipeline de ingestão (§7). Cada tipo de objeto pode 
 
 O DynamoDB é o armazenamento principal. Ele guarda **apenas** Knowledge Objects e suas relations — nenhum dado binário.
 
-**Padrão adotado: single-table com adjacency list.** Objetos e arestas coexistem na mesma tabela; um GSI invertido resolve os lookups reversos (backlinks).
+**Padrão adotado: single-table com adjacency list** ([ADR-006](DECISIONS.md)). Objetos e arestas coexistem na mesma tabela; um GSI invertido resolve os lookups reversos (backlinks).
+
+| Item | PK | SK |
+| --- | --- | --- |
+| Knowledge Object | `KO#<id>` | `META` |
+| Aresta (relation) | `KO#<origem>` | `REL#<tipo>#<relId>` |
+
+| Índice | PK | Serve |
+| --- | --- | --- |
+| **GSI1** (invertido) | `KO#<alvo>` | Backlinks; collections de um objeto |
+| **GSI2** | `TYPE#<tipo>` | Listagens por tipo |
+
+**Pertencer a uma collection é uma relation** (`in_collection`), não um mecanismo separado — um único mecanismo de arestas resolve relations, backlinks e coleções.
 
 Access patterns que o MVP precisa suportar:
 
 | # | Padrão | Como |
 | --- | --- | --- |
-| 1 | Buscar um objeto por `id` | `GetItem` na chave primária |
-| 2 | Listar relations de saída de um objeto | `Query` na partição do objeto |
-| 3 | Listar relations de entrada (backlinks) | `Query` no GSI invertido |
-| 4 | Listar os membros de uma collection | `Query` na partição da collection |
-| 5 | Listar as collections de um objeto | `Query` no GSI invertido |
-| 6 | Listar objetos por tipo / status / tag | GSI dedicado |
+| 1 | Buscar um objeto por `id` | `GetItem` em `KO#<id>` / `META` |
+| 2 | Listar relations de saída de um objeto | `Query` em `KO#<id>`, prefixo `REL#` |
+| 3 | Listar relations de entrada (backlinks) | `Query` no GSI1 |
+| 4 | Listar os membros de uma collection | `Query` no GSI1, tipo `in_collection` |
+| 5 | Listar as collections de um objeto | `Query` em `KO#<id>`, prefixo `REL#in_collection#` |
+| 6 | Listar objetos por tipo | `Query` no GSI2 |
+
+**Consistência:** as relations de saída (padrões 2 e 5) são fortemente consistentes, pois vivem na partição do próprio objeto. Já os **backlinks (padrões 3 e 4) são eventualmente consistentes por contrato** — GSIs do DynamoDB são atualizados de forma assíncrona, e a API não promete que uma relation recém-criada apareça imediatamente no alvo ([ADR-017](DECISIONS.md)).
 
 **Limitação assumida:** o DynamoDB resolve bem **um salto**. Travessia multi-hop exige N queries sequenciais e não é objetivo do MVP (§2.3) — a Graph Projection (§9) endereça isso quando houver necessidade real.
 
@@ -261,7 +340,7 @@ Consequências de design:
 - As chaves do DynamoDB **não** precisam de uma dimensão de tenant/workspace.
 - A autorização (IAM + nível de API) protege a *instância* inteira, não recortes de conhecimento por usuário.
 - Escritas concorrentes são raras por definição, o que reduz muito a pressão sobre o controle de concorrência (§6.4).
-- Multi-tenancy permanece um não-objetivo (§1). Se necessário no futuro, introduzir escopo de tenant nas chaves e nos eventos é uma evolução conhecida — registrada em §10.
+- Multi-tenancy permanece um não-objetivo (§1). Se necessário no futuro, introduzir escopo de tenant nas chaves e nos eventos é uma evolução conhecida — registrada em §11.
 
 ### 6.4 Concorrência
 
@@ -273,7 +352,9 @@ Com a `Note` atômica, o objeto é a unidade de conflito — não há necessidad
 
 ## 7. Pipeline de ingestão
 
-Toda escrita flui pela API. **Não há escrita direta no armazenamento.**
+Toda escrita flui pela API: **nenhuma escrita no modelo de conhecimento ocorre fora dela.**
+
+> A única exceção é o *payload binário* de anexos, que sobe direto para o S3 via presigned URL — os bytes não são conhecimento; o conhecimento é o objeto `Attachment`, e esse continua sendo criado exclusivamente pela API ([ADR-016](DECISIONS.md)).
 
 ```
 Cliente
@@ -344,27 +425,47 @@ A **Search Projection** é deliberadamente a primeira: ela valida o mecanismo de
 
 ---
 
-## 10. Questões de design em aberto
+## 10. Stack e organização do código
 
-Registradas aqui para serem resolvidas durante a implementação:
+| Camada | Decisão |
+| --- | --- |
+| Runtime | TypeScript / Node.js 22 em Lambda ARM64 ([ADR-001](DECISIONS.md)) |
+| Infraestrutura como código | AWS CDK em TypeScript ([ADR-002](DECISIONS.md)) |
+| Testes | Unit no `core` · integração com DynamoDB Local · E2E em conta sandbox ([ADR-004](DECISIONS.md)) |
 
-1. **Esquema de identificador** — ULID vs. UUIDv7, com prefixo `ko_` (§3.3).
-2. **Schema de chaves do single-table** — nomenclatura de PK/SK, quais GSIs e como as arestas são materializadas (§6.1).
-3. **Taxonomia de formatos de content** — o conjunto canônico de valores de `content.format` e como renderers/analyzers se registram para eles.
-4. **Integridade referencial** — o que acontece com as relations de entrada quando um objeto é deletado (cascata de `RelationRemoved` vs. dangling proposital).
-5. **Vocabulário de relations** — conjunto fechado e validado, ou aberto e definido pelo usuário.
-6. **Autorização** — mecanismo concreto de proteção da instância single-user (§6.3).
-7. **Critério para a Fase 4** — que evidência de uso justifica descer para blocos finos (§2.1).
-8. **Multi-tenancy futuro** — como introduzir escopo de tenant nas chaves e nos eventos, caso o projeto evolua para SaaS (§6.3).
+Monorepo com três pacotes ([ADR-003](DECISIONS.md)):
+
+| Pacote | Responsabilidade | Depende de AWS? |
+| --- | --- | --- |
+| `core` | Modelo canônico, parser, renderers, resolução de âncoras, regras de negócio | ❌ **não** |
+| `api` | Handlers Lambda, repositórios, publicação de eventos | ✅ |
+| `infra` | Stacks CDK | ✅ |
+
+O `core` livre de AWS é a materialização do princípio *storage is an implementation detail*: persistência e publicação de eventos entram como interfaces, implementadas em `api`. A complexidade real do sistema — parsing, âncoras, integridade do grafo — fica testável em milissegundos, sem container nem nuvem.
 
 ---
 
-## 11. Glossário
+## 11. Questões de design em aberto
+
+As decisões já tomadas estão registradas em **[DECISIONS.md](DECISIONS.md)**. Permanecem em aberto:
+
+1. **Taxonomia de formatos de content** — o conjunto canônico de valores de `content.format` além de `ckm/text`, e como renderers/analyzers se registram para eles (relevante a partir da Fase 2).
+2. **Critério para a Fase 4** — que evidência de uso justifica descer para blocos finos e para o AST inline (§2.1).
+3. **Multi-tenancy futuro** — como introduzir escopo de tenant nas chaves e nos eventos, caso o projeto evolua para SaaS (§6.3).
+4. **Reconciliação de anexos** — o que fazer com um `Attachment` cujo upload via presigned URL nunca se completou ([ADR-016](DECISIONS.md)).
+5. **Escape de âncoras** — regra para o caso de borda em que `⟦ ⟧` aparece literalmente no conteúdo do usuário ([ADR-005](DECISIONS.md)).
+
+---
+
+## 12. Glossário
 
 - **Modelo Canônico de Conhecimento** — a única representação interna de todo o conhecimento; a fonte da verdade.
 - **Knowledge Object** — qualquer elemento da plataforma, compartilhando a forma de quatro dimensões.
 - **Knowledge Graph** — a rede de Knowledge Objects conectados por relations.
-- **Relation** — um vínculo semântico tipado e direcionado, de primeira classe, entre dois objetos.
+- **Relation** — um vínculo semântico tipado, direcionado e **identificado**, de primeira classe, entre dois objetos.
+- **Relation inline** — relation que se manifesta em um ponto específico do conteúdo, marcada por uma âncora (§3.7).
+- **Relation standalone** — relation puramente semântica, sem posição no conteúdo (§3.7).
+- **Âncora** — token no `content` que marca a posição de uma relation inline, referenciando-a por `id` (§3.8).
 - **Renderer** — uma projeção pura e unidirecional dos objetos em uma representação (Markdown, HTML, JSON, MCP).
 - **Analyzer** — um componente que enriquece o grafo a partir do content de um objeto.
 - **Projeção** — uma visão otimizada para leitura, derivada do consumo de eventos (search, vector, graph, analytics).
