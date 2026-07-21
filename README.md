@@ -49,9 +49,11 @@ O modelo é ambicioso; o MVP é enxuto e deliberadamente focado.
 
 Isso preserva integralmente o modelo canônico — as quatro dimensões, a identidade imutável, as relations de primeira classe e as collections são as mesmas — e entrega o diferencial real do produto sem pagar, antes da hora, o custo de construir um *block store*. Descer a granularidade depois é **adicionar objetos filhos**, não redesenhar o modelo.
 
+Callouts, listas, tabelas e blocos de código continuam funcionando: eles viajam como **sintaxe dentro do conteúdo**, sobrevivem ao round-trip e são renderizados normalmente. O que ainda não fazem é existir como objetos endereçáveis no grafo.
+
 ### Dentro do MVP
 
-- ✅ `Note`, `Collection` e `Attachment` como Knowledge Objects
+- ✅ `Note` e `Collection` como Knowledge Objects
 - ✅ **Relations de primeira classe**, tipadas e por `id` imutável
 - ✅ Relations **inline** (ancoradas no texto) e **standalone** (puramente semânticas)
 - ✅ Uma nota em múltiplas coleções simultaneamente
@@ -62,7 +64,8 @@ Isso preserva integralmente o modelo canônico — as quatro dimensões, a ident
 
 ### Fora do MVP
 
-- ❌ Decomposição em blocos finos *(Fase 4)*
+- ❌ Decomposição em blocos finos — callouts, listas e tabelas viajam como sintaxe no conteúdo *(Fase 4)*
+- ❌ Objetos binários e Amazon S3 — sem `Attachment` no MVP *(pós-MVP)*
 - ❌ Travessia multi-hop de grafo *(Fase 5, via Graph Projection)*
 - ❌ MCP Server e analyzers automáticos *(Fase 2)*
 - ❌ Busca full-text *(Fase 3)*
@@ -80,7 +83,7 @@ Todo elemento da plataforma é um Knowledge Object. Todos compartilham um modelo
 - **Properties** — metadados (`title`, `tags`, `aliases`, `language`, `status`)
 - **Relations** — vínculos semânticos (`references`, `depends_on`, `related_to`, `implements`, `alternative_to`)
 
-O catálogo completo de tipos previstos inclui `Collection`, `Note`, `Heading`, `Paragraph`, `Callout`, `List`, `Table`, `Code Block`, `Mermaid`, `Image`, `Attachment` e `Quote`. O MVP implementa `Collection`, `Note` e `Attachment`.
+O catálogo completo de tipos previstos inclui `Collection`, `Note`, `Heading`, `Paragraph`, `Callout`, `List`, `Table`, `Code Block`, `Mermaid`, `Image`, `Attachment` e `Quote`. **O MVP implementa `Collection` e `Note`** — os demais existem como sintaxe dentro do conteúdo, preservados no round-trip e renderizados, mas ainda não endereçáveis como objetos.
 
 ### Relations ancoradas no conteúdo
 
@@ -124,7 +127,7 @@ Totalmente **serverless na AWS**:
 - **API Gateway** — ponto de entrada de todas as leituras e escritas
 - **AWS Lambda** — validação, parsing, enriquecimento, persistência
 - **DynamoDB** — objetos de conhecimento e seus relacionamentos (single-table, *adjacency list*)
-- **Amazon S3** — apenas objetos binários (imagens, vídeos, PDFs, anexos)
+- **Amazon S3** — objetos binários (imagens, vídeos, PDFs, anexos) — *pós-MVP*
 - **EventBridge** — eventos de domínio, com Archive & Replay
 - **CloudWatch** — observabilidade
 - **IAM** — controle de acesso
