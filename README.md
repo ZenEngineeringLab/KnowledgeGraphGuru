@@ -45,15 +45,18 @@ Markdown, HTML, JSON, MCP e outros formatos são apenas **representações difer
 
 O modelo é ambicioso; o MVP é enxuto e deliberadamente focado.
 
-**A decisão central:** no MVP, a **`Note` é a unidade atômica** de conhecimento. O corpo da nota vive inteiro em `content` — não há decomposição em objetos de bloco (`Paragraph`, `Heading`, `Callout`…) ainda.
+**A decisão central** não é traçada por tamanho, e sim por natureza do conteúdo:
 
-Isso preserva integralmente o modelo canônico — as quatro dimensões, a identidade imutável, as relations de primeira classe e as collections são as mesmas — e entrega o diferencial real do produto sem pagar, antes da hora, o custo de construir um *block store*. Descer a granularidade depois é **adicionar objetos filhos**, não redesenhar o modelo.
+> **Prosa e formatação ficam no conteúdo. Referência a outro objeto vira relation. Artefato tipado autocontido vira objeto.**
 
-Callouts, listas, tabelas e blocos de código continuam funcionando: eles viajam como **sintaxe dentro do conteúdo**, sobrevivem ao round-trip e são renderizados normalmente. O que ainda não fazem é existir como objetos endereçáveis no grafo.
+O critério é se o corpo daquilo é **prosa** ou **artefato**. O corpo de um callout é prosa — por isso ele fica como sintaxe, junto com parágrafos, headings e listas. O corpo de um bloco de código é código; o de um Mermaid é um diagrama. Esses carregam formato próprio, têm analyzer dedicado e fronteira sintática inequívoca — existem como objetos desde o MVP.
+
+O que fica de fora é decompor a **prosa** em objetos, que é a parte cara: parágrafos têm delimitação ambígua e aparecem às dezenas por nota. Artefatos tipados são folhas, não aninham e são poucos. Isso preserva integralmente o modelo canônico — descer a granularidade depois é **adicionar mais tipos de filho**, não redesenhar o modelo.
 
 ### Dentro do MVP
 
-- ✅ `Note` e `Collection` como Knowledge Objects
+- ✅ `Note`, `Collection`, `Table` e `CodeBlock` como Knowledge Objects
+- ✅ Diagramas **Mermaid** como `CodeBlock` — consultáveis no grafo por tipo e linguagem
 - ✅ **Relations de primeira classe**, tipadas e por `id` imutável
 - ✅ Relations **inline** (ancoradas no texto) e **standalone** (puramente semânticas)
 - ✅ Uma nota em múltiplas coleções simultaneamente
@@ -64,7 +67,7 @@ Callouts, listas, tabelas e blocos de código continuam funcionando: eles viajam
 
 ### Fora do MVP
 
-- ❌ Decomposição em blocos finos — callouts, listas e tabelas viajam como sintaxe no conteúdo *(Fase 4)*
+- ❌ Decomposição da prosa — parágrafos, headings, callouts e listas viajam como sintaxe *(Fase 4)*
 - ❌ Objetos binários e Amazon S3 — sem `Attachment` no MVP *(pós-MVP)*
 - ❌ Travessia multi-hop de grafo *(Fase 5, via Graph Projection)*
 - ❌ MCP Server e analyzers automáticos *(Fase 2)*
@@ -83,7 +86,9 @@ Todo elemento da plataforma é um Knowledge Object. Todos compartilham um modelo
 - **Properties** — metadados (`title`, `tags`, `aliases`, `language`, `status`)
 - **Relations** — vínculos semânticos (`references`, `depends_on`, `related_to`, `implements`, `alternative_to`)
 
-O catálogo completo de tipos previstos inclui `Collection`, `Note`, `Heading`, `Paragraph`, `Callout`, `List`, `Table`, `Code Block`, `Mermaid`, `Image`, `Attachment` e `Quote`. **O MVP implementa `Collection` e `Note`** — os demais existem como sintaxe dentro do conteúdo, preservados no round-trip e renderizados, mas ainda não endereçáveis como objetos.
+O catálogo completo de tipos previstos inclui `Collection`, `Note`, `Table`, `CodeBlock`, `Heading`, `Paragraph`, `Callout`, `List`, `Image`, `Attachment` e `Quote`. **O MVP implementa `Collection`, `Note`, `Table` e `CodeBlock`** — os de prosa existem como sintaxe dentro do conteúdo, preservados no round-trip e renderizados, mas ainda não endereçáveis como objetos.
+
+`Mermaid` não é um tipo próprio: é `CodeBlock` com `language: "mermaid"`. Assim os analyzers se registram **por linguagem** (`mermaid`, `sql`, `terraform`) sem inflar o catálogo.
 
 ### Relations ancoradas no conteúdo
 
@@ -98,7 +103,7 @@ Import    [[Modelo Canônico]]  →  resolve título → id  →  [[rel_01H8Z]] 
 Export    [[rel_01H8Z]]        →  lê o título ATUAL do alvo  →  [[Modelo Canônico]]
 ```
 
-Por que só o link recebe esse tratamento, enquanto callouts e tabelas ficam como sintaxe? **Sintaxe fica literal quando é autocontida; vira objeto quando referencia outra coisa.** Um callout não aponta para nada — nada pode mudar e torná-lo errado. Um link guarda o nome de outro objeto, e nomes mudam. Entre todos os construtos do Markdown, o wikilink é o único que cria dependência entre objetos.
+Por que só o link recebe esse tratamento, enquanto o callout fica como sintaxe? **Sintaxe fica literal quando é autocontida; vira relation quando referencia outra coisa.** Um callout não aponta para nada — nada pode mudar e torná-lo errado. Um link guarda o nome de outro objeto, e nomes mudam. Entre todos os construtos do Markdown, o wikilink é o único que cria dependência entre objetos.
 
 Relations que não têm posição no texto — como uma seta extraída de um diagrama Mermaid — são igualmente cidadãs de primeira classe, apenas sem âncora. Veja [DESIGN.md §3.8](DESIGN.md).
 
@@ -177,7 +182,7 @@ O sistema busca compatibilidade com o ecossistema Markdown/Obsidian para **impor
 
 | Fase | Escopo |
 | --- | --- |
-| **1 — MVP** | `Note` atômica, `Collection`, relations de 1ª classe, API REST, renderers Markdown + JSON, eventos |
+| **1 — MVP** | `Note`, `Collection`, `Table`, `CodeBlock`, relations de 1ª classe, API REST, renderers Markdown + JSON, eventos |
 | **2 — Agentes** | MCP Server, renderer HTML, Markdown e Mermaid Analyzers |
 | **3 — Busca** | Search Projection |
 | **4 — Granularidade fina** | Objetos de bloco, se o uso real justificar |
