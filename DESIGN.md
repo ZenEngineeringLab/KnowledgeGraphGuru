@@ -338,7 +338,7 @@ Consequências do mecanismo:
 - **Relations passam a ter identidade própria** (`id`). Isso não é acessório: um cidadão de primeira classe tem identidade. Antes, relations eram pares anônimos `{type, target}`.
 - **O content não é Markdown consumível diretamente.** A notação é a mesma, mas o miolo dos colchetes é um `id` — só o renderer sabe transformá-lo em texto legível. Isso não é efeito colateral indesejado: é o princípio *"Markdown is a rendering format"* sendo cumprido literalmente. Se o content fosse Markdown pronto para uso, Markdown seria o formato de armazenamento.
 - **O texto nunca guarda o título do alvo.** Renomear a nota alvo faz todos os links se re-renderizarem corretamente, sem reescrever nenhum content — comportamento que Markdown puro não entrega.
-- **Embeds usam o mesmo mecanismo** — `![[rel_id]]` é uma âncora cuja relation tem tipo `embeds`.
+- **A âncora é uniforme** — `[[rel_id]]` serve para tudo. É o **tipo da relation** que decide a renderização, não a sintaxe no texto (§3.9).
 - **Sobrevive à Fase 4** — quando o conteúdo for decomposto em blocos, a âncora funciona igual dentro de um `Paragraph`.
 
 #### Alias
@@ -373,6 +373,55 @@ Como a API canônica aceita content pronto, um cliente pode enviar `[[…]]` com
 | --- | --- |
 | `POST /notes` | Todo `[[…]]` deve referenciar uma relation presente no payload. Título solto é erro |
 | `POST /import/markdown` | Títulos são aceitos e resolvidos para âncoras — é o papel do adaptador |
+
+### 3.9 Artefatos embutidos
+
+Um bloco de código ou uma tabela também têm **posição no texto** — não basta saber que a nota os contém. Eles usam exatamente o mesmo mecanismo de âncora dos links (§3.8).
+
+A diferença é que **a âncora é gerada, não escrita**. Ninguém digita uma referência: o parser reconhece a cerca de código e cria o objeto.
+
+```
+Markdown de entrada
+   Veja:
+   ```sql
+   SELECT * FROM foo
+   ```
+        ↓ parser
+content:   "Veja:\n\n[[rel_01H8Z]]"
+relations: { id: "rel_01H8Z", type: "embeds", target: "ko_cb01" }
+objeto:    { id: "ko_cb01", type: "CodeBlock",
+             properties: { language: "sql" },
+             content:    { format: "sql", value: "SELECT * FROM foo" },
+             structure:  { parent: "ko_nota" } }
+        ↓ renderer
+Markdown de saída — a cerca reconstruída a partir do objeto
+```
+
+O `content` da nota guarda **apenas a posição**; o código mora no objeto. Estruturalmente é idêntico ao link — muda só o que o renderer faz ao resolver:
+
+| Tipo da relation | O renderer busca | Emite |
+| --- | --- | --- |
+| `references` | O **título** atual do alvo | `[[Título]]` |
+| `embeds` | O **conteúdo** do alvo | O artefato reconstruído, inline |
+
+**A sintaxe da âncora é uniforme.** Não há marcador de embed no content — nada de `![[…]]`. Isso seria repetir no texto uma informação que já está na relation, criando a possibilidade de divergirem: `!` no content, `references` na relation, e nenhuma regra para decidir qual vale. Pela regra que governa as duas dimensões (§3.1), ser embed é **significado**, e significado mora na relation.
+
+Nada disso muda o Markdown que o usuário vê: a exportação continua emitindo `![[Título]]` para transclusões, porque o renderer sabe o tipo pela relation.
+
+#### Artefato filho vs. transclusão
+
+Duas coisas diferentes usam `embeds`, e elas se comportam de forma oposta na remoção:
+
+| | **Artefato filho** | **Transclusão** |
+| --- | --- | --- |
+| Exemplo | Um `CodeBlock` dentro da nota | `![[Outra Nota]]` |
+| Criado por | Parser, a partir da sintaxe | Autor, referenciando algo existente |
+| Existe sozinho? | ❌ | ✅ |
+| Ao deletar a nota | **Morre junto** | **Sobrevive** |
+
+O que distingue os dois **não é o tipo da relation** — é o `structure.parent`. O `CodeBlock` tem `parent` apontando para a nota; a nota transcluída tem `parent` nulo, porque é independente.
+
+`embeds` e `parent` são fatos **ortogonais**: um diz *"renderiza aqui"*, o outro diz *"pertence a, e morre junto"*. É por isso que a cascata estrutural (§8.3) é enunciada sobre `parent`, e não sobre o tipo da relation.
 
 ---
 
@@ -589,13 +638,16 @@ Isso preserva o fluxo de escrita do ecossistema Markdown — citar algo antes de
 
 Consequência operacional: o custo do delete é proporcional ao número de backlinks do objeto.
 
-**Deletar um objeto cascateia na estrutura.** Os artefatos tipados embutidos nele (§2.1) são deletados junto, cada um emitindo `KnowledgeDeleted`. Diferente de uma relation — que liga dois objetos independentes — um artefato embutido **não tem existência fora do seu pai**: um bloco de código sem a nota que o contém não é conhecimento, é um fragmento órfão.
+**Deletar um objeto cascateia na estrutura.** Todo objeto cujo `structure.parent` aponta para ele é deletado junto, cada um emitindo `KnowledgeDeleted`. Um artefato embutido **não tem existência fora do seu pai**: um bloco de código sem a nota que o contém não é conhecimento, é um fragmento órfão.
+
+O critério é o `parent`, **não** o tipo da relation (§3.9). Uma nota transcluída também é alcançada por uma relation `embeds`, mas tem `parent` nulo — é independente e sobrevive à remoção de quem a transcluía. Some apenas a relation.
 
 A distinção entre as duas cascatas:
 
 | | Relation | Filho estrutural |
 | --- | --- | --- |
 | Liga | Dois objetos independentes | Um objeto ao seu contêiner |
+| Determinado por | `type` da relation | `structure.parent` |
 | No delete do outro lado | A relation some, o objeto permanece | O filho é deletado junto |
 
 **Remover uma relation inline remove sua âncora.** As duas operações ocorrem na **mesma transação** — uma âncora apontando para uma relation inexistente é um estado inválido que o renderer teria de adivinhar como tratar.
