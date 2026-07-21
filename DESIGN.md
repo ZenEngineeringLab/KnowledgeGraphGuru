@@ -148,6 +148,33 @@ Duas coisas que um nome de arquivo acumulava — e que aqui são separadas:
 
 Renomear muda o slug e não quebra nada, porque as relations usam `id`. O slug antigo passa a constar em `properties.aliases`, que compartilha o mesmo namespace de resolução — links escritos com o nome antigo continuam resolvendo.
 
+#### Normalização
+
+O título preserva a grafia original, com acentuação e pontuação. O slug não: ele é restrito a `[a-z0-9-]`.
+
+```
+1. Decompõe (NFD) e remove os diacríticos      Canônico → Canonico
+2. Minúsculas                                   Canonico → canonico
+3. Tudo que não for [a-z0-9] vira separador     "AWS: decisões!" → "aws  decisoes "
+4. Sequências de separador viram um "-"         → "aws-decisoes"
+5. Remove "-" das pontas
+6. Trunca em 100 caracteres, na borda do "-"
+```
+
+| Título | Slug |
+| --- | --- |
+| `Modelo Canônico` | `modelo-canonico` |
+| `Arquitetura AWS: decisões` | `arquitetura-aws-decisoes` |
+| `Análise 2026 — Fase 1` | `analise-2026-fase-1` |
+| `O que é um "Knowledge Object"?` | `o-que-e-um-knowledge-object` |
+| `🚀 Deploy` | `deploy` |
+
+**Títulos que normalizam para vazio são rejeitados com `400`.** Isso alcança dois casos: títulos compostos apenas de símbolos (`###`, `🚀`) e títulos em escrita não-latina (`設計ノート`), que a regra `[a-z0-9]` esvazia por completo.
+
+A consequência assumida é que **títulos precisam usar alfabeto latino**. A alternativa — cair para o `id` como slug — produziria endereços ilegíveis e arquivos exportados sem sentido, esvaziando o propósito do slug. Aceitar letras Unicode resolveria o caso internacional ao custo de nomes de arquivo e URLs menos portáveis; é uma abertura retrocompatível, se o uso vier a pedir.
+
+> **A normalização torna a detecção de colisão deliberadamente tolerante.** `Modelo Canônico`, `modelo canonico` e `Modelo, Canônico!` produzem o mesmo slug e colidem entre si (§8.1). Ela não pega apenas duplicata exata — pega **quase-duplicata**, que é justamente o caso em que alguém não percebeu que o conhecimento já existia.
+
 ### 3.4 Exemplo ilustrativo de uma `Note` no MVP
 
 > Apenas ilustrativo — o schema concreto será fixado durante a implementação.
@@ -564,7 +591,6 @@ Tudo o mais neste documento reflete decisões já tomadas. Permanecem em aberto:
 4. **Reconciliação de anexos** — o que fazer com um `Attachment` cujo upload via presigned URL nunca se completou.
 5. **Escape de âncoras** — regra para o caso de borda em que `⟦ ⟧` aparece literalmente no conteúdo do usuário.
 6. **Importação de acervo inteiro** — resolver conflito a conflito via `409` (§8.1) não escala para um vault com centenas de arquivos. Vai exigir uma *sessão de importação* que acumula pendências e as apresenta em lote. Consequência conhecida, fora do escopo da Fase 1.
-7. **Normalização de slug** — regra exata para acentuação, pontuação, emojis e títulos que normalizam para vazio (§3.3).
 
 ---
 
