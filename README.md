@@ -91,12 +91,14 @@ Um link no meio de um texto é duas coisas ao mesmo tempo: uma **relação semâ
 
 > **Content guarda a posição. Relations guardam o significado.**
 
-O conteúdo carrega uma **âncora** que referencia a relation por `id`; a relation carrega o alvo e o tipo. Como o texto nunca guarda o título do alvo, renomear uma nota faz todos os links que apontam para ela se re-renderizarem corretamente — sem reescrever uma linha de conteúdo.
+O conteúdo carrega uma **âncora** — a própria notação `[[…]]`, com o `id` da relation no lugar do título. A relation carrega o alvo e o tipo. Como o texto nunca guarda o título do alvo, renomear uma nota faz todos os links que apontam para ela se re-renderizarem corretamente — sem reescrever uma linha de conteúdo.
 
 ```
-Import    [[Modelo Canônico]]   →  resolve título → id  →  ⟦rel_01H8Z⟧ + relation
-Export    ⟦rel_01H8Z⟧           →  lê o título ATUAL do alvo  →  [[Modelo Canônico]]
+Import    [[Modelo Canônico]]  →  resolve título → id  →  [[rel_01H8Z]] + relation
+Export    [[rel_01H8Z]]        →  lê o título ATUAL do alvo  →  [[Modelo Canônico]]
 ```
+
+Por que só o link recebe esse tratamento, enquanto callouts e tabelas ficam como sintaxe? **Sintaxe fica literal quando é autocontida; vira objeto quando referencia outra coisa.** Um callout não aponta para nada — nada pode mudar e torná-lo errado. Um link guarda o nome de outro objeto, e nomes mudam. Entre todos os construtos do Markdown, o wikilink é o único que cria dependência entre objetos.
 
 Relations que não têm posição no texto — como uma seta extraída de um diagrama Mermaid — são igualmente cidadãs de primeira classe, apenas sem âncora. Veja [DESIGN.md §3.8](DESIGN.md).
 

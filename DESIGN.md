@@ -193,7 +193,7 @@ A consequência assumida é que **títulos precisam usar alfabeto latino**. A al
   },
   "content": {
     "format": "ckm/text",
-    "value": "Conforme o ⟦rel_01H8Z⟧, relations são cidadãs de primeira classe."
+    "value": "Conforme o [[rel_01H8Z]], relations são cidadãs de primeira classe."
   },
   "properties": {
     "title": "Modelo canônico",
@@ -250,52 +250,111 @@ Note que `in_collection` é uma relation como qualquer outra (§6.1) — pertenc
 
 ### 3.8 Mecanismo de âncora
 
-Uma relation inline precisa ser renderizada **no lugar certo** do texto. Duas abordagens ingênuas falham:
+#### Por que o link é diferente de todo o resto
 
-- **Guardar `[[Título]]` literal no content** — o link volta a ser texto. Renomear o alvo quebra o vínculo, e Markdown volta a ser o formato de armazenamento. Contraria os princípios 2 e 5.
+Callouts, listas, tabelas e blocos de código ficam como sintaxe dentro do content (§2.2), mas o link não. A regra que explica os dois:
+
+> **Sintaxe fica literal quando é autocontida. Vira objeto quando referencia outra coisa.**
+
+Um callout — `> [!warning] Cuidado com throttling` — não aponta para lugar nenhum. Nada no acervo pode mudar e tornar aquele texto errado; guardá-lo verbatim é seguro para sempre.
+
+Um link guarda o **título** de outro objeto. E títulos mudam. No instante em que alguém renomeia o alvo, todo `[[Título Antigo]]` espalhado pelo acervo fica errado — restando quebrar o link, ou reescrever todas as notas que citam. Este último é literalmente o que o Obsidian faz ao renomear um arquivo.
+
+Entre todos os construtos do Markdown, **o wikilink é o único que cria dependência entre objetos**. A exceção é de exatamente um caso — e é o caso sobre o qual o produto inteiro se sustenta.
+
+#### Abordagens que falham
+
+- **Guardar `[[Título]]` literal** — o link volta a ser texto. Renomear quebra o vínculo, e Markdown volta a ser o formato de armazenamento. Contraria os princípios 2 e 5.
 - **Guardar offsets de caractere na relation** — qualquer edição do texto invalida todas as posições seguintes.
 
-> **Granularidade não resolve isso.** Decompor o conteúdo em `Paragraph` não preserva a posição de um link: um parágrafo com dois links continua sendo um único bloco de texto com dois links no meio dele. Âncoras são necessárias em **qualquer** nível de granularidade — e, com elas, a `Note` atômica do MVP não perde nada de posição. O que a granularidade compra é outra coisa: endereçar um bloco (`[[Nota#^bloco]]`), transcluí-lo e dar-lhe metadados próprios.
+> **Granularidade não resolve isso.** Decompor o conteúdo em `Paragraph` não preserva a posição de um link: um parágrafo com dois links continua sendo um único bloco de texto com dois links no meio dele. Âncoras são necessárias em **qualquer** nível de granularidade — e, com elas, a `Note` atômica do MVP não perde nada de posição. O que a granularidade compra é outra coisa: endereçar um bloco, transcluí-lo e dar-lhe metadados próprios.
 
-**Solução adotada:** o content carrega um **token de âncora** que referencia a relation pelo seu `id`. A relation carrega o alvo e o tipo. Nenhum dos dois duplica o outro.
+#### Solução adotada
 
-O formato `ckm/text` é uma **string legível**: sintaxe de Markdown mais âncoras delimitadas por `⟦ ⟧` (U+27E6 / U+27E7).
+O content carrega uma **âncora** que referencia a relation pelo seu `id`. A relation carrega o alvo e o tipo. Nenhum dos dois duplica o outro.
 
-A sintaxe cobre tanto o nível inline (`**negrito**`, `` `código` ``) quanto o de bloco — callouts, listas, tabelas, headings, blocos de código. Enquanto a `Note` for atômica, é aqui que esses elementos vivem: preservados no round-trip e renderizados em HTML, mas não endereçáveis como objetos (§2.2).
-
-Os delimitadores `⟦ ⟧` praticamente não ocorrem em texto natural, o que reduz o escaping a um caso de borda — a regra exata para quando eles aparecerem literalmente no conteúdo do usuário fica para a implementação do parser.
+A âncora usa a própria notação de wikilink, `[[ ]]`, com o `id` da relation no lugar do título:
 
 ```json
 {
   "content": {
     "format": "ckm/text",
-    "value": "Conforme o ⟦rel_01H8Z⟧, relations são cidadãs de primeira classe."
+    "value": "Conforme o [[rel_01H8Z]], relations são cidadãs de primeira classe."
   },
   "relations": [
-    { "id": "rel_01H8Z", "type": "references", "target": "ko_01H...", "inline": true }
+    { "id": "rel_01H8Z", "type": "references", "target": "ko_01H...other",   "inline": true  },
+    { "id": "rel_01H8W", "type": "depends_on", "target": "ko_01H...another", "inline": false }
   ]
 }
 ```
 
-**Alternativa rejeitada:** representar o content como um AST de nós inline (`[{"text":…},{"ref":…}]`). Elimina o escaping e é conceitualmente mais puro, mas sacrifica a legibilidade do conteúdo e a utilidade dos diffs no git — que são requisitos deste projeto. O AST inline fica para a Fase 4, junto com a decomposição em blocos: granularidade vertical e horizontal são a mesma máquina, e serão construídas de uma vez.
+A cadeia de resolução na renderização:
 
-Consequências:
+```
+content: [[rel_01H8Z]]
+   ↓ procura em relations
+relation: target = ko_01H...other
+   ↓ busca o objeto
+alvo: properties.title = "Modelo Canônico"
+   ↓
+saída: [[Modelo Canônico]]
+```
 
-- **Relations passam a ter identidade própria** (`id`). Isso não é acessório: um cidadão de primeira classe tem identidade. Antes, relations eram pares anônimos `{type, target}`.
-- **O content deixa de ser Markdown válido** e passa a ser conteúdo canônico com tokens — daí `content.format: "ckm/text"`. Isso não é um efeito colateral indesejado: é o princípio *"Markdown is a rendering format"* sendo cumprido literalmente. Se o content fosse Markdown válido, Markdown seria o formato de armazenamento.
-- **O texto nunca guarda o título do alvo.** Renomear a nota alvo faz todos os links se re-renderizarem corretamente, sem reescrever nenhum content. É o comportamento que Markdown puro não entrega.
-- **Alias é opcional** (`[[Título|texto exibido]]`): quando informado, vira um campo da relation; quando ausente, o renderer resolve o título atual do alvo.
-- **Embeds usam o mesmo mecanismo** — `![[imagem]]` é uma âncora cuja relation tem tipo `embeds`.
-- **Sobrevive à Fase 4** — quando o conteúdo for decomposto em blocos, a âncora funciona igual dentro de um `Paragraph`.
+Repare no contraste: `rel_01H8Z` é `inline: true` e seu `id` aparece no texto; `rel_01H8W` é `inline: false` e não aparece em lugar nenhum — existe no grafo, mas não se manifesta na prosa. O `content` nunca guarda o `target` nem o título, só o ponteiro para a relation. É isso que faz renomear o alvo não tocar em nenhuma nota.
+
+> O campo `inline` é tecnicamente derivável varrendo o content, mas é mantido explícito para não exigir parsing de texto ao responder uma pergunta estrutural. Ele também serve de invariante na validação: `inline: true` exige âncora presente; `false` exige âncora ausente.
+
+O formato `ckm/text` é, portanto, uma **string legível** — sintaxe de Markdown mais âncoras. A sintaxe cobre tanto o nível inline (`**negrito**`, `` `código` ``) quanto o de bloco: callouts, listas, tabelas, headings, blocos de código. Enquanto a `Note` for atômica, é aqui que esses elementos vivem (§2.2).
 
 #### Ciclo de importação e exportação
 
 ```
-Import    [[Modelo Canônico]]   →  resolve título → id  →  ⟦rel_01H8Z⟧  +  relation
-Export    ⟦rel_01H8Z⟧           →  lê o título ATUAL do alvo           →  [[Modelo Canônico]]
+Import    [[Modelo Canônico]]  →  resolve título → id  →  [[rel_01H8Z]]  +  relation
+Export    [[rel_01H8Z]]        →  lê o título ATUAL do alvo  →  [[Modelo Canônico]]
 ```
 
-Links para notas inexistentes (`[[Nota Que Não Existe]]`) criam uma `Note` com `status: "stub"`, mantendo a regra de que toda relation aponta para um objeto real.
+Links para notas inexistentes (`[[Nota Que Não Existe]]`) criam uma `Note` com `status: "stub"`, mantendo a regra de que toda relation aponta para um objeto real (§8.2).
+
+Consequências do mecanismo:
+
+- **Relations passam a ter identidade própria** (`id`). Isso não é acessório: um cidadão de primeira classe tem identidade. Antes, relations eram pares anônimos `{type, target}`.
+- **O content não é Markdown consumível diretamente.** A notação é a mesma, mas o miolo dos colchetes é um `id` — só o renderer sabe transformá-lo em texto legível. Isso não é efeito colateral indesejado: é o princípio *"Markdown is a rendering format"* sendo cumprido literalmente. Se o content fosse Markdown pronto para uso, Markdown seria o formato de armazenamento.
+- **O texto nunca guarda o título do alvo.** Renomear a nota alvo faz todos os links se re-renderizarem corretamente, sem reescrever nenhum content — comportamento que Markdown puro não entrega.
+- **Embeds usam o mesmo mecanismo** — `![[rel_id]]` é uma âncora cuja relation tem tipo `embeds`.
+- **Sobrevive à Fase 4** — quando o conteúdo for decomposto em blocos, a âncora funciona igual dentro de um `Paragraph`.
+
+#### Alias
+
+O separador `|` significa **alias autoral**, sempre — nunca um cache do título. Ele vive no próprio content, não como campo da relation: é texto de apresentação, e apresentação é responsabilidade do conteúdo.
+
+| Forma | Renderiza |
+| --- | --- |
+| `[[rel_01H8Z]]` | O **título atual** do alvo, resolvido na hora |
+| `[[rel_01H8Z\|meu texto]]` | `meu texto`, literal — o autor escolheu assim |
+
+Isso preserva a semântica do Obsidian: quem escreveu `[[Modelo Canônico|o modelo]]` continua vendo *o modelo*. E elimina qualquer risco de defasagem — não existe título armazenado para envelhecer, porque quando há texto ali ele é fixo por intenção.
+
+*(Não confundir com `properties.aliases` do objeto alvo, que são nomes alternativos para **resolução** — mecanismo distinto, §3.3.)*
+
+#### Escaping
+
+Como `[[ ]]` é notação comum, escrever colchetes duplos literais é um caso concreto — documentar o próprio sistema já exige isso. Valem as convenções que qualquer parser Markdown implementa:
+
+- dentro de crase — `` `[[texto]]` `` — nada é interpretado;
+- barra invertida — `\[[texto]]` — para o restante.
+
+**Alternativa rejeitada:** delimitadores exóticos como `⟦ ⟧`, que praticamente não ocorrem em texto natural e reduziriam o escaping a um caso de borda. Perde-se mais do que se ganha: a notação familiar mantém o content parecido com Markdown e torna o round-trip quase idêntico — só o miolo dos colchetes muda.
+
+**Alternativa rejeitada:** representar o content como um AST de nós inline (`[{"text":…},{"ref":…}]`). Elimina o escaping e é conceitualmente mais puro, mas sacrifica a legibilidade do conteúdo e a utilidade dos diffs no git — que são requisitos deste projeto. O AST inline fica para a Fase 4, junto com a decomposição em blocos: granularidade vertical e horizontal são a mesma máquina, e serão construídas de uma vez.
+
+#### Validação por rota
+
+Como a API canônica aceita content pronto, um cliente pode enviar `[[…]]` com qualquer coisa dentro:
+
+| Rota | Regra |
+| --- | --- |
+| `POST /notes` | Todo `[[…]]` deve referenciar uma relation presente no payload. Título solto é erro |
+| `POST /import/markdown` | Títulos são aceitos e resolvidos para âncoras — é o papel do adaptador |
 
 ---
 
@@ -595,7 +654,7 @@ O `core` livre de AWS é a materialização do princípio *storage is an impleme
 - **Relation** — um vínculo semântico tipado, direcionado e **identificado**, de primeira classe, entre dois objetos.
 - **Relation inline** — relation que se manifesta em um ponto específico do conteúdo, marcada por uma âncora (§3.7).
 - **Relation standalone** — relation puramente semântica, sem posição no conteúdo (§3.7).
-- **Âncora** — token no `content` que marca a posição de uma relation inline, referenciando-a por `id` (§3.8).
+- **Âncora** — `[[rel_id]]` no `content`, marcando a posição de uma relation inline e referenciando-a por `id`. Nunca guarda o título do alvo (§3.8).
 - **Slug** — título normalizado (`Modelo Canônico` → `modelo-canonico`) que serve de endereço único e legível do objeto; derivado automaticamente, nunca digitado (§3.3).
 - **Stub** — nota criada automaticamente por um link para conhecimento que ainda não foi escrito (§8.2).
 - **Renderer** — uma projeção pura e unidirecional dos objetos em uma representação (Markdown, HTML, JSON, MCP).
