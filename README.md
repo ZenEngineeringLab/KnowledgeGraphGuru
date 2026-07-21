@@ -40,16 +40,45 @@ Markdown, HTML, JSON, MCP e outros formatos são apenas **representações difer
 7. Renderers nunca modificam o Modelo Canônico de Conhecimento.
 8. Analyzers enriquecem o conhecimento.
 
+## Escopo do MVP
+
+O modelo é ambicioso; o MVP é enxuto e deliberadamente focado.
+
+**A decisão central:** no MVP, a **`Note` é a unidade atômica** de conhecimento. O corpo da nota vive inteiro em `content` — não há decomposição em objetos de bloco (`Paragraph`, `Heading`, `Callout`…) ainda.
+
+Isso preserva integralmente o modelo canônico — as quatro dimensões, a identidade imutável, as relations de primeira classe e as collections são as mesmas — e entrega o diferencial real do produto sem pagar, antes da hora, o custo de construir um *block store*. Descer a granularidade depois é **adicionar objetos filhos**, não redesenhar o modelo.
+
+### Dentro do MVP
+
+- ✅ `Note`, `Collection` e `Attachment` como Knowledge Objects
+- ✅ **Relations de primeira classe**, tipadas e por `id` imutável
+- ✅ Uma nota em múltiplas coleções simultaneamente
+- ✅ Vizinhança de **1 salto** no grafo — referências e *backlinks*
+- ✅ API REST como único caminho de escrita
+- ✅ Renderers **Markdown** e **JSON**
+- ✅ Eventos de domínio com log durável para replay
+
+### Fora do MVP
+
+- ❌ Decomposição em blocos finos *(Fase 4)*
+- ❌ Travessia multi-hop de grafo *(Fase 5, via Graph Projection)*
+- ❌ MCP Server e analyzers automáticos *(Fase 2)*
+- ❌ Busca full-text *(Fase 3)*
+- ❌ Banco vetorial e banco de grafos *(Fase 5)*
+- ❌ Multi-tenancy — o MVP é single-user / self-hosted
+
 ## Conceitos centrais
 
 ### Knowledge Object
 
-Todo elemento da plataforma é um Knowledge Object — `Collection`, `Note`, `Heading`, `Paragraph`, `Callout`, `List`, `Table`, `Code Block`, `Mermaid`, `Image`, `Attachment`, `Quote`, entre outros. Todos compartilham um modelo comum, composto por quatro dimensões:
+Todo elemento da plataforma é um Knowledge Object. Todos compartilham um modelo comum, composto por quatro dimensões:
 
 - **Structure** — posição na árvore (`parent`, `children`, `order`)
 - **Content** — o conteúdo em si (texto, código, mermaid, lista…)
 - **Properties** — metadados (`title`, `tags`, `aliases`, `language`, `status`)
 - **Relations** — vínculos semânticos (`references`, `depends_on`, `related_to`, `implements`, `alternative_to`)
+
+O catálogo completo de tipos previstos inclui `Collection`, `Note`, `Heading`, `Paragraph`, `Callout`, `List`, `Table`, `Code Block`, `Mermaid`, `Image`, `Attachment` e `Quote`. O MVP implementa `Collection`, `Note` e `Attachment`.
 
 ### Organização
 
@@ -57,11 +86,11 @@ A estrutura de diretórios deixa de ser física. Ela é expressa por meio de obj
 
 ### Renderers
 
-O conhecimento é projetado sob demanda em múltiplos formatos — inicialmente **Markdown**, **HTML**, **JSON** e **MCP**. Novos renderers podem ser adicionados sem alterar o modelo.
+O conhecimento é projetado sob demanda em múltiplos formatos — **Markdown** e **JSON** no MVP, **HTML** e **MCP** na sequência. Novos renderers podem ser adicionados sem alterar o modelo.
 
 ### Analyzers
 
-Cada tipo de objeto pode ter um analisador dedicado (Markdown, Mermaid, Terraform, SQL, Java…) que **enriquece o grafo de conhecimento** — por exemplo, extraindo relacionamentos de um diagrama Mermaid para alimentar o grafo automaticamente.
+Cada tipo de objeto pode ter um analisador dedicado (Markdown, Mermaid, Terraform, SQL, Java…) que **enriquece o grafo de conhecimento** — por exemplo, extraindo relacionamentos de um diagrama Mermaid para alimentar o grafo automaticamente. No MVP, as relations são explícitas; a extração automática entra na Fase 2.
 
 ## Arquitetura
 
@@ -69,13 +98,13 @@ Totalmente **serverless na AWS**:
 
 - **API Gateway** — ponto de entrada de todas as leituras e escritas
 - **AWS Lambda** — validação, parsing, enriquecimento, persistência
-- **DynamoDB** — objetos de conhecimento e seus relacionamentos
+- **DynamoDB** — objetos de conhecimento e seus relacionamentos (single-table, *adjacency list*)
 - **Amazon S3** — apenas objetos binários (imagens, vídeos, PDFs, anexos)
-- **EventBridge** — eventos de domínio
+- **EventBridge** — eventos de domínio, com Archive & Replay
 - **CloudWatch** — observabilidade
 - **IAM** — controle de acesso
 
-> A primeira versão **não usa banco vetorial nem banco de grafos**. Ambos podem ser adicionados depois como *projeções* opcionais, sem alterar o modelo canônico.
+> O MVP **não usa banco vetorial nem banco de grafos**. Ambos podem ser adicionados depois como *projeções* opcionais, sem alterar o modelo canônico.
 
 ### Pipeline de ingestão
 
@@ -103,31 +132,36 @@ Toda escrita **precisa** passar pela API — não há escrita direta no armazena
 
 A plataforma foi concebida para ser consumida por pessoas *e* por agentes de IA através de:
 
-- **REST API**
-- **MCP Server**
+- **REST API** — MVP
+- **MCP Server** — Fase 2
 
 ## Compatibilidade
 
 O sistema busca compatibilidade com o ecossistema Markdown/Obsidian para **importação e exportação**, mas **não** adota o modelo interno dessas ferramentas. A representação interna é sempre o Modelo Canônico de Conhecimento.
 
+> **Markdown é interchange com perdas, por design.** Importar e exportar preserva o *conhecimento* — conteúdo semântico, properties e relations — mas normaliza a formatação de origem. A compatibilidade é de interoperabilidade, não de fidelidade byte a byte.
+
 ## Roadmap
 
-Projeções futuras que poderão ser adicionadas sem alterar o modelo canônico:
+| Fase | Escopo |
+| --- | --- |
+| **1 — MVP** | `Note` atômica, `Collection`, relations de 1ª classe, API REST, renderers Markdown + JSON, eventos |
+| **2 — Agentes** | MCP Server, renderer HTML, Markdown e Mermaid Analyzers |
+| **3 — Busca** | Search Projection |
+| **4 — Granularidade fina** | Objetos de bloco, se o uso real justificar |
+| **5 — Projeções avançadas** | Vector Projection, Graph Projection, Analytics Projection |
 
-- **Search Projection**
-- **Vector Projection** — embeddings como projeção opcional
-- **Graph Projection** — Neo4j ou Amazon Neptune
-- **Analytics Projection**
+A Fase 3 vem antes da Fase 4 de propósito: validar o mecanismo de projeções (barato) antes de investir no *block store* (caro).
 
 ## Documentação
 
-- **[DESIGN.md](DESIGN.md)** — o Modelo Canônico de Conhecimento, o mapeamento de dados, o pipeline, os eventos e a estratégia de evolução em profundidade.
+- **[DESIGN.md](DESIGN.md)** — a estratégia de MVP, o Modelo Canônico de Conhecimento, o mapeamento de dados, o pipeline, os eventos e a estratégia de evolução em profundidade.
 
 ## Status
 
-🚧 Fase inicial de design. O modelo e a arquitetura estão sendo definidos antes do início da implementação.
+🚧 Fase inicial de design. O modelo e a arquitetura estão definidos; a implementação da Fase 1 ainda não começou.
 
-**Modo de operação (v1):** single-user / self-hosted — uma base de conhecimento por instância.
+**Modo de operação (MVP):** single-user / self-hosted — uma base de conhecimento por instância.
 
 ---
 
